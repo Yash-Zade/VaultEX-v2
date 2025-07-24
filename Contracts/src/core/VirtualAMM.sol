@@ -65,6 +65,26 @@ contract VirtualAMM is Ownable{
         virtualReserveVUSDT = vUSDT;
     }
 
+    function calculateFundingRate() external view onlyPositionManager returns (int256 fundingRateBps) {
+        uint256 spotPrice = uint256(priceFeed.getLatestPrice());
+
+        (uint256 vAMMPrice, bool isValid) = getCurrentPrice();
+        if (!isValid || spotPrice == 0) {
+            return 0;
+        }
+
+        int256 rawFundingRate = int256(vAMMPrice * 10000 / spotPrice) - 10000;
+
+        if (rawFundingRate > 500) {
+            fundingRateBps = 500;
+        } else if (rawFundingRate < -500) {
+            fundingRateBps = -500;
+        } else {
+            fundingRateBps = rawFundingRate;
+        }
+    }
+
+
     function sqrt(uint x) internal pure returns (uint y) {
         if (x == 0) return 0;
         uint z = x / 2 + 1;
