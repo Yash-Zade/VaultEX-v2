@@ -136,4 +136,14 @@ contract Vault is Ownable {
         return utilizationRate;
     }
 
+    // Fallback function - handles unknown calls
+    fallback() external{
+        revert("Incorrect function call");
+    }
+
+    // Receive function - handles plain ETH transfers
+    receive() external payable {
+        revert("Contract does not accept ETH");
+    }
+
 }
