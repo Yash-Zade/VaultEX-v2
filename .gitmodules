@@ -1,6 +1,0 @@
-[submodule "lib/forge-std"]
-	path = lib/forge-std
-	url = https://github.com/foundry-rs/forge-std
-[submodule "lib/zksync-era"]
-	path = lib/zksync-era
-	url = https://github.com/matter-labs/zksync-era
