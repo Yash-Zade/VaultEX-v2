@@ -10,7 +10,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     // Struct to hold position details
     struct PositionMetadata {
         uint256 tokenId;
-        uint256 size;
+        uint8 leverage;
         uint256 collateral;
         uint256 entryPrice;
         uint256 entryTimestamp;
@@ -34,9 +34,9 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     uint256 private _tokenIdCounter;
 
     // Events
-    event PositionMinted(uint256 indexed tokenId, address indexed user, uint256 size, uint256 collateral, bool isLong);
+    event PositionMinted(uint256 indexed tokenId, address indexed user, uint256 leverage, uint256 collateral, bool isLong);
     event PositionBurned(uint256 indexed tokenId);
-    event PositionUpdated(uint256 indexed tokenId, uint256 size, uint256 collateral);
+    event PositionUpdated(uint256 indexed tokenId, uint8 leverage, uint256 collateral);
 
     // Restrict to position manager
     modifier onlyPositionManager() {
@@ -57,15 +57,9 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     // Mint a new position NFT
-    function mintPosition(
-        address to,
-        uint256 size,
-        uint256 collateral,
-        uint256 entryPrice,
-        bool isLong
-    ) external onlyPositionManager nonReentrant returns (uint256) {
+    function mintPosition(address to, uint256 collateral, uint8 leverage, uint256 entryPrice, bool isLong) external onlyPositionManager nonReentrant returns (uint256) {
         require(to != address(0), "Invalid user address");
-        require(size > 0, "Size must be > 0");
+        require(leverage > 0, "leverage must be > 0");
         require(collateral > 0, "Collateral must be > 0");
 
         uint256 tokenId = _tokenIdCounter++;
@@ -73,7 +67,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
 
         positionMetadata[tokenId] = PositionMetadata({
             tokenId: tokenId,
-            size: size,
+            leverage: leverage,
             collateral: collateral,
             entryPrice: entryPrice,
             entryTimestamp: block.timestamp,
@@ -83,7 +77,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
 
         _userTokens[to].push(tokenId);
 
-        emit PositionMinted(tokenId, to, size, collateral, isLong);
+        emit PositionMinted(tokenId, to, leverage, collateral, isLong);
         return tokenId;
     }
 
@@ -109,20 +103,21 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     // Update size and collateral of an existing position
-    function updatePosition(uint256 tokenId, uint256 newSize, uint256 newCollateral) external onlyPositionManager {
+    function updatePosition(uint256 tokenId, uint8 newLeverage, uint256 newCollateral) external onlyPositionManager {
         require(_ownerOf(tokenId) != address(0), "Position does not exist");
 
         PositionMetadata storage pos = positionMetadata[tokenId];
-        pos.size = newSize;
+        pos.leverage = newLeverage;
         pos.collateral = newCollateral;
 
-        emit PositionUpdated(tokenId, newSize, newCollateral);
+        emit PositionUpdated(tokenId, newLeverage, newCollateral);
     }
 
     // View details of a specific position
-    function getPosition(uint256 tokenId) external view returns (PositionMetadata memory) {
+    function getPosition(uint256 tokenId) external view returns (uint256, uint256, uint8, uint256, uint256, bool, string memory) {
         require(_ownerOf(tokenId) != address(0), "Position does not exist");
-        return positionMetadata[tokenId];
+        PositionMetadata memory pos = positionMetadata[tokenId];
+        return (pos.tokenId, pos.collateral, pos.leverage, pos.entryPrice, pos.entryTimestamp, pos.isLong, pos.symbol);
     }
 
     // Get list of position token IDs owned by a user
