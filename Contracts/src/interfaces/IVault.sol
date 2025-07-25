@@ -16,7 +16,7 @@ interface IVault {
     function withdrawCollateral(uint256 _amount) external;
     function lockCollateral(address _user, uint256 _amount) external;
     function unlockCollateral(address _user, uint256 _amount) external;
-    function transferCollateral(address _from, address _to, uint256 _amount) external;
+    function transferCollateral(address _to, uint256 _amount) external;
     function setPositionManager(address _positionManager) external;
 
     // View functions

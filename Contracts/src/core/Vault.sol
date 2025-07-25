@@ -107,18 +107,18 @@ contract Vault is Ownable {
         emit CollateralUnlocked(_user, _amount);
     }
 
-    // Transfer locked collateral from one user to another
-    function transferCollateral(address _from, address _to, uint _amount) external onlyPositionManager() {
+    // Transfer locked collateral from contract to user
+    function transferCollateral(address _to, uint _amount) external onlyPositionManager() {
         require(_amount > 0, "Amount should be greater than 0");
-        require(userData[_from].lockedBalance >= _amount, "Insufficient locked balance to unlock");
+        require(userData[address(this)].lockedBalance >= _amount, "Insufficient locked balance to unlock");
 
-        userData[_from].lockedBalance -= _amount;
+        userData[address(this)].lockedBalance -= _amount;
         userData[_to].availableBalance += _amount;
 
         totalLocked -= _amount;
         utilizationRate = (totalLocked * 10000) / totalDeposits;
 
-        emit CollateralTransferred(_from, _to, _amount);
+        emit CollateralTransferred(address(this), _to, _amount);
     }
 
     // Get caller's balances
