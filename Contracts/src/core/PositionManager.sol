@@ -100,48 +100,66 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
 
     }
 
-    function closePosition(uint256 tokenId, uint256 priceDelta) external{
+    function closePosition(uint256 tokenId, uint256 priceDelta) external {
         require(positionNFT.ownerOf(tokenId) == msg.sender, "Not position owner");
         require(priceDelta >= 0, "Size should be greater than 0");
 
-        (uint256 tokenId, uint256 collateral, uint8 leverage, uint256 entryPrice, uint256 entryTimestamp,int entryFundingRate, bool isLong, string memory symbol) = positionNFT.getPosition(tokenId);
+        // Load position data
+        (
+            ,
+            uint256 collateral,
+            uint8 leverage,
+            uint256 entryPrice,,
+            int entryFundingRate,
+            bool isLong,) = positionNFT.getPosition(tokenId);
 
         require(priceDelta >= collateral, "collateral delta too large");
+
         (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
         require(isValid, "Invalid Price");
 
-        int priceChangePercentage;
+        int finalPnl = _calculatePnl(isLong, leverage, collateral, entryPrice, currentPrice);
+        int fundingReward = _calculateFundingReward(isLong, finalPnl, collateral, entryFundingRate);
 
-        if(isLong) priceChangePercentage = (int(currentPrice) *1e18)/int(entryPrice) - 1e18;
-        else priceChangePercentage = 1e18 - (int(currentPrice) *1e18)/int(entryPrice);
-        
-        int pnlPercent = (priceChangePercentage * int8(leverage)) / 1e18;
-
-        int finalPnl = int(collateral) * pnlPercent /1e18;
-        int setteledAmount = int(collateral) + finalPnl;
-        int256 fundingDelta = fundingRateAccumulated - entryFundingRate;
-        int fundingReward = setteledAmount * fundingDelta / 10000;
-
-        if ((isLong && fundingDelta < 0) || (!isLong && fundingDelta > 0)) {
-            // Long pays Short || short pays long
-            setteledAmount -= fundingReward;
-        } else {
-            // long recive from short || short recives from long
-            setteledAmount += fundingReward;
-        }
-
-        uint256 fees = ((collateral * leverage) * TRADING_FEES) / 1e6; // 500/1e6 = 0.05%
-
-        setteledAmount -= int(fees);
+        uint256 fees = ((collateral * leverage) * TRADING_FEES) / 1e6;
+        int settledAmount = int(collateral) + finalPnl + fundingReward - int(fees);
 
         positionNFT.burnPosition(tokenId);
         delete positions[msg.sender];
-        int amountToTransfer = finalPnl+fundingReward;
-        if(amountToTransfer>0)  vault.transferCollateral(msg.sender,uint(amountToTransfer));
-        vault.unlockCollateral(msg.sender, uint(setteledAmount));
+        
+        if ( (finalPnl + fundingReward) > 0) {
+            vault.transferCollateral(msg.sender, uint((finalPnl + fundingReward)));
+        }
+        vault.unlockCollateral(msg.sender, uint(settledAmount));
 
         emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
     }
+
+    function _calculatePnl(bool isLong, uint8 leverage, uint256 collateral, uint256 entryPrice, uint256 currentPrice) internal pure returns (int) {
+        int priceChangePercentage;
+
+        if (isLong) {
+            priceChangePercentage = (int(currentPrice) * 1e18) / int(entryPrice) - 1e18;
+        } else {
+            priceChangePercentage = 1e18 - (int(currentPrice) * 1e18) / int(entryPrice);
+        }
+
+        int pnlPercent = (priceChangePercentage * int8(leverage)) / 1e18;
+        return int(collateral) * pnlPercent / 1e18;
+    }
+
+    function _calculateFundingReward(bool isLong, int finalPnl, uint256 collateral, int entryFundingRate) internal view returns (int) {
+        int settledAmount = int(collateral) + finalPnl;
+        int fundingDelta = fundingRateAccumulated - entryFundingRate;
+        int fundingReward = (settledAmount * fundingDelta) / 10000;
+
+        if ((isLong && fundingDelta < 0) || (!isLong && fundingDelta > 0)) {
+            return -fundingReward; // pay
+        } else {
+            return fundingReward; // receive
+        }
+    }
+
 
     function updateFundingRate() external onlyOwner(){
         require(block.timestamp >= lastFundingTime + 8 hours, "Funding rate can only be updated every 8 hours");
