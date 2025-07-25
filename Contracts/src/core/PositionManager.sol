@@ -35,7 +35,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         uint256 entryPrice;
         uint256 exitPrice;
         uint256 positionSize;
-        int8 entryFundingRate;
+        int256 entryFundingRate;
         uint8 leverage;
         bool isLong;
         bool isOpen;
@@ -44,8 +44,8 @@ contract PositionManager is ReentrancyGuard, Ownable{
     mapping (address => Position) positions;
 
     event FundingRateUpdated(int256 fundingRateBps, uint256 timestamp);
-    event PositionOpened(address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int8 entryFundingRate, bool isLong);
-    event PositionClosed(address user, uint256 collateral, uint256 entryPrice, uint256 exitPrice, uint8 leverage, uint8 accumulatedFundingrate, int256 pnl, bool isLong);
+    event PositionOpened(address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int256 entryFundingRate, bool isLong);
+    event PositionClosed(address user, uint256 collateral, uint256 entryPrice, uint256 exitPrice, int256 fundingReward,uint8 leverage, int256 pnl, bool isLong);
 
     constructor(address _priceFeed, address _positionNFT, address _virtualAMM, address _vault ) Ownable(msg.sender){
         priceFeed = IPriceFeed(_priceFeed);
@@ -71,7 +71,7 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         virtualAMM.updateReserve(amount, _isLong);
 
         uint256 entryPrice = uint(priceFeed.getLatestPrice());
-        int8 entryFundingRate = int8(virtualAMM.calculateFundingRate());
+        int entryFundingRate = (virtualAMM.calculateFundingRate());
 
         positions[msg.sender] = Position({
             user: msg.sender,
@@ -94,10 +94,53 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         }
 
          // record NFT for open position
-        positionNFT.mintPosition(msg.sender, netCollateral, _leverage, entryPrice, _isLong);
+        positionNFT.mintPosition(msg.sender, netCollateral, _leverage, entryPrice, entryFundingRate, _isLong);
 
         emit PositionOpened(msg.sender, netCollateral, entryPrice, _leverage, entryFundingRate, _isLong);
 
+    }
+
+    function closePosition(uint256 tokenId, uint256 priceDelta) external{
+        require(positionNFT.ownerOf(tokenId) == msg.sender, "Not position owner");
+        require(priceDelta >= 0, "Size should be greater than 0");
+
+        (uint256 tokenId, uint256 collateral, uint8 leverage, uint256 entryPrice, uint256 entryTimestamp,int entryFundingRate, bool isLong, string memory symbol) = positionNFT.getPosition(tokenId);
+
+        require(priceDelta >= collateral, "collateral delta too large");
+        (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
+        require(isValid, "Invalid Price");
+
+        int priceChangePercentage;
+
+        if(isLong) priceChangePercentage = (int(currentPrice) *1e18)/int(entryPrice) - 1e18;
+        else priceChangePercentage = 1e18 - (int(currentPrice) *1e18)/int(entryPrice);
+        
+        int pnlPercent = (priceChangePercentage * int8(leverage)) / 1e18;
+
+        int finalPnl = int(collateral) * pnlPercent /1e18;
+        int setteledAmount = int(collateral) + finalPnl;
+        int256 fundingDelta = fundingRateAccumulated - entryFundingRate;
+        int fundingReward = setteledAmount * fundingDelta / 10000;
+
+        if ((isLong && fundingDelta < 0) || (!isLong && fundingDelta > 0)) {
+            // Long pays Short || short pays long
+            setteledAmount -= fundingReward;
+        } else {
+            // long recive from short || short recives from long
+            setteledAmount += fundingReward;
+        }
+
+        uint256 fees = ((collateral * leverage) * TRADING_FEES) / 1e6; // 500/1e6 = 0.05%
+
+        setteledAmount -= int(fees);
+
+        positionNFT.burnPosition(tokenId);
+        delete positions[msg.sender];
+        int amountToTransfer = finalPnl+fundingReward;
+        if(amountToTransfer>0)  vault.transferCollateral(msg.sender,uint(amountToTransfer));
+        vault.unlockCollateral(msg.sender, uint(setteledAmount));
+
+        emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
     }
 
     function updateFundingRate() external onlyOwner(){
@@ -107,6 +150,5 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         lastFundingTime += block.timestamp;
         emit FundingRateUpdated(fundingRateBps, block.timestamp);
     }
-
 
 }
