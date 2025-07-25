@@ -13,6 +13,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
         uint8 leverage;
         uint256 collateral;
         uint256 entryPrice;
+        int256 entryFundingRate;
         uint256 entryTimestamp;
         bool isLong;
         string symbol;
@@ -57,7 +58,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     // Mint a new position NFT
-    function mintPosition(address to, uint256 collateral, uint8 leverage, uint256 entryPrice, bool isLong) external onlyPositionManager nonReentrant returns (uint256) {
+    function mintPosition(address to, uint256 collateral, uint8 leverage, uint256 entryPrice, int256 entryFundingRate, bool isLong) external onlyPositionManager nonReentrant returns (uint256) {
         require(to != address(0), "Invalid user address");
         require(leverage > 0, "leverage must be > 0");
         require(collateral > 0, "Collateral must be > 0");
@@ -70,6 +71,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
             leverage: leverage,
             collateral: collateral,
             entryPrice: entryPrice,
+            entryFundingRate: entryFundingRate,
             entryTimestamp: block.timestamp,
             isLong: isLong,
             symbol: isLong ? "vETH-LONG" : "vETH-SHORT"
@@ -114,10 +116,10 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     // View details of a specific position
-    function getPosition(uint256 tokenId) external view returns (uint256, uint256, uint8, uint256, uint256, bool, string memory) {
+    function getPosition(uint256 tokenId) external view returns (uint256, uint256, uint8, uint256, uint256, int256, bool, string memory) {
         require(_ownerOf(tokenId) != address(0), "Position does not exist");
         PositionMetadata memory pos = positionMetadata[tokenId];
-        return (pos.tokenId, pos.collateral, pos.leverage, pos.entryPrice, pos.entryTimestamp, pos.isLong, pos.symbol);
+        return (pos.tokenId, pos.collateral, pos.leverage, pos.entryPrice, pos.entryTimestamp, pos.entryFundingRate, pos.isLong, pos.symbol);
     }
 
     // Get list of position token IDs owned by a user
