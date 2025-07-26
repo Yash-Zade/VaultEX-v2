@@ -165,7 +165,7 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         require(block.timestamp >= lastFundingTime + 8 hours, "Funding rate can only be updated every 8 hours");
         int fundingRateBps = virtualAMM.calculateFundingRate();
         fundingRateAccumulated += fundingRateBps;
-        lastFundingTime += block.timestamp;
+        lastFundingTime = block.timestamp;
         emit FundingRateUpdated(fundingRateBps, block.timestamp);
     }
 
