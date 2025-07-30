@@ -110,16 +110,29 @@ contract Vault is Ownable {
     // Transfer locked collateral from contract to user
     function transferCollateral(address _to, uint _amount) external onlyPositionManager() {
         require(_amount > 0, "Amount should be greater than 0");
-        require(userData[address(this)].lockedBalance >= _amount, "Insufficient locked balance to unlock");
-
-        userData[address(this)].lockedBalance -= _amount;
-        userData[_to].availableBalance += _amount;
+        require(totalLocked >= _amount, "Insufficient locked balance to unlock");
 
         totalLocked -= _amount;
+        userData[_to].availableBalance += _amount;
+
         utilizationRate = (totalLocked * 10000) / totalDeposits;
 
         emit CollateralTransferred(address(this), _to, _amount);
     }
+
+    // Called when a user's position is liquidated
+    function absorbLiquidatedCollateral(address _user, uint _amount) external onlyPositionManager {
+        require(_amount > 0, "Amount must be greater than 0");
+        require(userData[_user].lockedBalance >= _amount, "Insufficient locked balance");
+
+        userData[_user].lockedBalance -= _amount;
+        totalLocked -= _amount;
+
+        utilizationRate = (totalLocked * 10000) / totalDeposits;
+
+        emit CollateralTransferred(_user, address(this), _amount);
+    }
+
 
     // Get caller's balances
     function getUserCollateral() external view returns(UserData memory) {

@@ -18,6 +18,7 @@ interface IVault {
     function unlockCollateral(address _user, uint256 _amount) external;
     function transferCollateral(address _to, uint256 _amount) external;
     function setPositionManager(address _positionManager) external;
+    function absorbLiquidatedCollateral(address _user, uint _amount) external;
 
     // View functions
     function getUserCollateral() external view returns (UserData memory);
