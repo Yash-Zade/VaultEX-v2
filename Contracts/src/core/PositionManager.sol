@@ -100,23 +100,21 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
 
     }
 
-    function closePosition(uint256 tokenId, uint256 priceDelta) external {
+    function closePosition(uint256 tokenId, uint256 priceDelta) external nonReentrant {
         require(positionNFT.ownerOf(tokenId) == msg.sender, "Not position owner");
-        require(priceDelta >= 0, "Size should be greater than 0");
+        require(priceDelta >= 0, "Invalid priceDelta");
 
-        // Load position data
-        (
-            ,
+        (   ,
             uint256 collateral,
             uint8 leverage,
             uint256 entryPrice,,
             int entryFundingRate,
             bool isLong,) = positionNFT.getPosition(tokenId);
 
-        require(priceDelta >= collateral, "collateral delta too large");
+        require(priceDelta >= collateral, "Collateral delta too large");
 
         (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
-        require(isValid, "Invalid Price");
+        require(isValid, "Invalid price");
 
         int finalPnl = _calculatePnl(isLong, leverage, collateral, entryPrice, currentPrice);
         int fundingReward = _calculateFundingReward(isLong, finalPnl, collateral, entryFundingRate);
@@ -126,13 +124,38 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
 
         positionNFT.burnPosition(tokenId);
         delete positions[msg.sender];
-        
-        if ( (finalPnl + fundingReward) > 0) {
-            vault.transferCollateral(msg.sender, uint((finalPnl + fundingReward)));
-        }
-        vault.unlockCollateral(msg.sender, uint(settledAmount));
 
+        // Handle liquidation
+        if (isLiquidated(msg.sender)) {
+            vault.absorbLiquidatedCollateral(msg.sender, _amount);
+            emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
+            return;
+        }
+
+        vault.unlockCollateral(msg.sender, collateral);
+
+        if (settledAmount > 0) {
+            vault.transferCollateral(address(this), msg.sender, uint(settledAmount));
+        }
+        
         emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
+    }
+
+
+    function isLiquidated(address user) public view returns(bool){
+        Position memory pos = positions[user];
+
+        (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
+        require(isValid, "Invalid Price");
+        
+        int pnl = _calculatePnl(pos.isLong, pos.leverage, pos.collateral, pos.entryPrice, currentPrice);
+        int256 entryPriceWithFee = (int256(pos.entryPrice) * 95) / 100;
+
+        if((int(currentPrice) + pnl) >= entryPriceWithFee){
+            return false;
+        }
+
+        return true;
     }
 
     function _calculatePnl(bool isLong, uint8 leverage, uint256 collateral, uint256 entryPrice, uint256 currentPrice) internal pure returns (int) {
