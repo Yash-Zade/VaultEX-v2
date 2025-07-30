@@ -100,9 +100,8 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
 
     }
 
-    function closePosition(uint256 tokenId, uint256 priceDelta) external nonReentrant {
+    function closePosition(uint256 tokenId) external nonReentrant {
         require(positionNFT.ownerOf(tokenId) == msg.sender, "Not position owner");
-        require(priceDelta >= 0, "Invalid priceDelta");
 
         (   ,
             uint256 collateral,
@@ -111,7 +110,6 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
             int entryFundingRate,
             bool isLong,) = positionNFT.getPosition(tokenId);
 
-        require(priceDelta >= collateral, "Collateral delta too large");
 
         (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
         require(isValid, "Invalid price");
