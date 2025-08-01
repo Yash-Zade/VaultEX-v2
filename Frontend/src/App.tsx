@@ -9,6 +9,8 @@ import DocsPage from "@/pages/docs";
 import PricingPage from "@/pages/pricing";
 import BlogPage from "@/pages/blog";
 import AboutPage from "@/pages/about";
+import TradePage from "./pages/trade";
+import VaultPage from "./pages/vault";
 
 // Query client instance
 const queryClient = new QueryClient();
@@ -23,6 +25,8 @@ function App() {
           <Route element={<PricingPage />} path="/pricing" />
           <Route element={<BlogPage />} path="/blog" />
           <Route element={<AboutPage />} path="/about" />
+          <Route element={<TradePage />} path="/trade" />
+          <Route element={<VaultPage />} path="/vault" />
         </Routes>
       </QueryClientProvider>
     </WagmiProvider>
