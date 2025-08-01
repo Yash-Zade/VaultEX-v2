@@ -5,6 +5,14 @@ export const siteConfig = {
   description: "Modular DeFi protocol for perpetual contract trading with integrated vault management.",
   navItems: [
     {
+      label: "Vault",
+      href: "/vault",
+    },
+    {
+      label: "Trade",
+      href: "/trade",
+    },
+    {
       label: "Docs",
       href: "/docs",
     },
