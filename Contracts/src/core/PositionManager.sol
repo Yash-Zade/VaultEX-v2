@@ -13,13 +13,14 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
     uint constant MAX_LEVERAGE = 50;
     uint256 constant TRADING_FEES = 50;
-
+    uint256 public constant LIQUIDATION_THRESHOLD_BPS = 500; // 5%
 
     uint public totalLong;
     uint public totalShort;
     uint public totalLongCollateral;
     uint public totalShortCollateral;
     int public fundingRateAccumulated;
+    bool public emergencyPause;
 
     uint public lastFundingTime;
 
@@ -43,6 +44,21 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
     mapping (address => Position) positions;
 
+
+    error ContractPaused();
+    error InsufficientCollateral();
+    error InvalidLeverage();
+    error InsufficientFunds();
+    error PositionNotFound();
+    error NotPositionOwner();
+    error PositionNotLiquidatable();
+    error FundingTooEarly();
+
+    modifier whenNotPaused() {
+        if (emergencyPause) revert ContractPaused();
+        _;
+    }
+
     event FundingRateUpdated(int256 fundingRateBps, uint256 timestamp);
     event PositionOpened(address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int256 entryFundingRate, bool isLong);
     event PositionClosed(address user, uint256 collateral, uint256 entryPrice, uint256 exitPrice, int256 fundingReward,uint8 leverage, int256 pnl, bool isLong);
@@ -54,7 +70,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         vault = IVault(_vault);
     }
 
-function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external nonReentrant {
+function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external nonReentrant whenNotPaused {
     
         require(_collateral > 0, "Collateral cannot be zero");
         require(_leverage > 0 && _leverage <= MAX_LEVERAGE, "Invalid leverage");
@@ -100,15 +116,20 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
 
     }
 
-    function closePosition(uint256 tokenId) external nonReentrant {
+    function closePosition(uint256 tokenId) external nonReentrant whenNotPaused {
         require(positionNFT.ownerOf(tokenId) == msg.sender, "Not position owner");
 
-        (   ,
+        (
+            ,
             uint256 collateral,
             uint8 leverage,
-            uint256 entryPrice,,
-            int entryFundingRate,
-            bool isLong,) = positionNFT.getPosition(tokenId);
+            uint256 entryPrice,
+            ,
+            int256 entryFundingRate,
+            bool isLong,
+            ,
+
+        ) = positionNFT.getPosition(tokenId);
 
 
         (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
@@ -124,8 +145,8 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         delete positions[msg.sender];
 
         // Handle liquidation
-        if (isLiquidated(msg.sender)) {
-            vault.absorbLiquidatedCollateral(msg.sender, _amount);
+        if (isLiquidatable(msg.sender)) {
+            vault.absorbLiquidatedCollateral(msg.sender, collateral);
             emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
             return;
         }
@@ -133,28 +154,25 @@ function openPosition(uint _collateral, uint8 _leverage, bool _isLong) external 
         vault.unlockCollateral(msg.sender, collateral);
 
         if (settledAmount > 0) {
-            vault.transferCollateral(address(this), msg.sender, uint(settledAmount));
+            vault.transferCollateral(msg.sender, uint(settledAmount));
         }
         
         emit PositionClosed(msg.sender, collateral, entryPrice, currentPrice, fundingReward, leverage, finalPnl, isLong);
     }
 
+    function isLiquidatable(address user) internal view returns (bool) {
+            Position memory pos = positions[user];
+            (uint256 currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
+            if (!isValid) return false;
 
-    function isLiquidated(address user) public view returns(bool){
-        Position memory pos = positions[user];
+            int256 pnl = _calculatePnl(pos.isLong, pos.leverage, pos.collateral, pos.entryPrice, currentPrice);
+            int256 fundingPayment = _calculateFundingReward(pos.isLong, pnl, pos.collateral, pos.entryFundingRate);
 
-        (uint currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
-        require(isValid, "Invalid Price");
-        
-        int pnl = _calculatePnl(pos.isLong, pos.leverage, pos.collateral, pos.entryPrice, currentPrice);
-        int256 entryPriceWithFee = (int256(pos.entryPrice) * 95) / 100;
+            int256 remainingValue = int256(pos.collateral) + pnl - fundingPayment;
+            int256 maintenanceMargin = int256(pos.collateral * LIQUIDATION_THRESHOLD_BPS) / 10000;
 
-        if((int(currentPrice) + pnl) >= entryPriceWithFee){
-            return false;
+            return remainingValue <= maintenanceMargin;
         }
-
-        return true;
-    }
 
     function _calculatePnl(bool isLong, uint8 leverage, uint256 collateral, uint256 entryPrice, uint256 currentPrice) internal pure returns (int) {
         int priceChangePercentage;
