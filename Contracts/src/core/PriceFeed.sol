@@ -26,4 +26,9 @@ contract PriceFeed {
     function getDecimals() external view returns (uint8) {
         return priceFeed.decimals();
     }
+
+    function setAggregator(address _aggregator) external {
+        require(_aggregator != address(0), "Invalid aggregator address");
+        priceFeed = AggregatorV3Interface(_aggregator);
+    }
 }
