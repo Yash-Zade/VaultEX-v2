@@ -16,6 +16,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
         int256 entryFundingRate;
         uint256 entryTimestamp;
         bool isLong;
+        bool isOpen;
         string symbol;
     }
 
@@ -58,10 +59,18 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     // Mint a new position NFT
-    function mintPosition(address to, uint256 collateral, uint8 leverage, uint256 entryPrice, int256 entryFundingRate, bool isLong) external onlyPositionManager nonReentrant returns (uint256) {
+     function mintPosition(
+        address to, 
+        uint256 collateral, 
+        uint8 leverage, 
+        uint256 entryPrice, 
+        int256 entryFundingRate, 
+        bool isLong
+    ) external onlyPositionManager nonReentrant returns (uint256) {
         require(to != address(0), "Invalid user address");
-        require(leverage > 0, "leverage must be > 0");
+        require(leverage > 0 && leverage <= 50, "Invalid leverage range");
         require(collateral > 0, "Collateral must be > 0");
+        require(entryPrice > 0, "Entry price must be > 0");
 
         uint256 tokenId = _tokenIdCounter++;
         _safeMint(to, tokenId);
@@ -74,6 +83,7 @@ contract PositionNFT is ERC721, Ownable, ReentrancyGuard {
             entryFundingRate: entryFundingRate,
             entryTimestamp: block.timestamp,
             isLong: isLong,
+            isOpen: true,
             symbol: isLong ? "vETH-LONG" : "vETH-SHORT"
         });
 
