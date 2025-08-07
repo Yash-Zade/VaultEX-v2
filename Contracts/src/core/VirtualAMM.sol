@@ -11,6 +11,8 @@ contract VirtualAMM is Ownable{
     uint constant PRICE_PRECISION = 1e8;
     address positionManager;
     IPriceFeed priceFeed;
+    
+    event ReservesUpdated(uint256 vETHreserve, uint256 vUSDTreserve);
 
     // Only position manager can call certain functions
     modifier onlyPositionManager() {
@@ -37,20 +39,25 @@ contract VirtualAMM is Ownable{
         return(price, true);
     }
 
-    function updateReserve(uint _amount, bool isLong) external onlyPositionManager(){
+    function updateReserve(uint _amount, bool _isLong) external onlyPositionManager(){
         require(_amount > 0, "Amount should be greater than 0");
+        require(virtualReserveVETH > 0 && virtualReserveVUSDT > 0, "invalid reserves");
 
-        uint size = _amount * virtualReserveVETH / (virtualReserveVUSDT + _amount);
+        uint256 k = virtualReserveVETH * virtualReserveVUSDT;
 
-        if(isLong){
-            // Buy ETH using USDT → ETH down, USDT up
-            virtualReserveVETH -=size;
+        if (_isLong) {
+            // Trader adds USDT, remove ETH to keep x*y=k
             virtualReserveVUSDT += _amount;
-        }else{
-            // Sell ETH for USDT → ETH up, USDT down
-            virtualReserveVETH +=size;
+            virtualReserveVETH = k / virtualReserveVUSDT;
+        } else {
+            // Trader removes USDT, add ETH to keep x*y=k
+            require(virtualReserveVUSDT > _amount, "underflow");
             virtualReserveVUSDT -= _amount;
+            virtualReserveVETH = k / virtualReserveVUSDT;
         }
+
+        emit ReservesUpdated(virtualReserveVETH, virtualReserveVUSDT);
+
     }
 
     function setInitialPrice() external onlyOwner(){
