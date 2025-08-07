@@ -41,7 +41,7 @@ contract Vault is Ownable {
     constructor(address _vUSDT) Ownable(msg.sender) {
         vUSDT = IERC20(_vUSDT);
     }
-
+    
     // Set position manager address
     function setPositionManager(address _positionManager) external onlyOwner() {
         require(_positionManager != address(0), "Invalid address");
