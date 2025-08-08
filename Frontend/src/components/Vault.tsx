@@ -15,58 +15,63 @@ import { config } from "@/config/wagmi-config";
 import VUSDT_ABI from "@/abis/vusdt.json";
 import VAULT_ABI from "@/abis/vault.json";
 
-const VUSDT_ADDRESS = "0x0692647Fb00C5452099b20325F8F21892F6Bf30c";
-const VAULT_ADDRESS = "0x450Eab9FF923bC3765EfAFE4E4841A0a6feD67f3";
+const VUSDT_ADDRESS = import.meta.env.VITE_VUSDT_ADDRESS;
+const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
 
 export default function VaultPage() {
   const { address } = useAccount();
   const [vusdtBalance, setVusdtBalance] = useState("0");
-  const [vaultBalance, setVaultBalance] = useState("0");
-  const [ethBalance, setEthBalance] = useState("0");
-
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [isDepositing, setIsDepositing] = useState(false);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [activeField, setActiveField] = useState<'deposit' | 'withdraw'>('deposit');
+  const [userCollateral, setUserCollateral] = useState({
+    deposited: '',
+    locked: '',
+    available: '',
+  });
+
 
   const loadBalances = async () => {
     if (!address) return;
 
-    const [vusdtBal, userCollateral, ethBalHex] = await Promise.all([
-      readContract(config, {
-        address: VUSDT_ADDRESS,
-        abi: VUSDT_ABI,
-        functionName: 'balanceOf',
-        args: [address],
-      }),
+    try {
+      const [vusdtBal, userCollateral] = await Promise.all([
+        readContract(config, {
+          address: VUSDT_ADDRESS,
+          abi: VUSDT_ABI,
+          functionName: 'balanceOf',
+          args: [address],
+        }),
 
-      readContract(config, {
-        address: VAULT_ADDRESS,
-        abi: VAULT_ABI,
-        functionName: 'getUserCollateral',
-      }),
+        readContract(config, {
+          address: VAULT_ADDRESS,
+          abi: VAULT_ABI,
+          functionName: 'getUserCollateral',
+          account: address,
+        }),
+      ]);
 
-      window.ethereum.request({
-        method: 'eth_getBalance',
-        params: [address, 'latest'],
-      }),
-    ]);
+      setUserCollateral({
+        deposited: formatUnits(userCollateral.depositedBalance, 18),
+        locked: formatUnits(userCollateral.lockedBalance, 18),
+        available: formatUnits(userCollateral.availableBalance, 18),
+      });
 
-    const { depositedBalance } = userCollateral as {
-      depositedBalance: bigint;
-      lockedBalance: bigint;
-      availableBalance: bigint;
-    };
+      setVusdtBalance(formatUnits(vusdtBal as bigint, 18));
 
-    setVusdtBalance(formatUnits(vusdtBal as bigint, 18));
-    setVaultBalance(formatUnits(depositedBalance, 18));
-    setEthBalance(formatUnits(BigInt(ethBalHex as string), 18));
+    } catch (error) {
+      console.error("Failed to load balances:", error);
+    }
   };
 
-
   const handleAirdrop = async () => {
+    console.log("Airdropping 1000 vUSDT to", address);
     await writeContract(config, {
       address: VUSDT_ADDRESS,
       abi: VUSDT_ABI,
-      functionName: 'mint',
+      functionName: 'airDrop',
       args: [address],
       gas: BigInt(60000), // conservative gas limit
       maxFeePerGas: BigInt(30e9), // 30 Gwei
@@ -77,43 +82,88 @@ export default function VaultPage() {
 
 
   const handleDeposit = async () => {
-    const amt = parseUnits(depositAmount, 18);
+    if (!depositAmount || isNaN(Number(depositAmount)) || Number(depositAmount) <= 0) {
+      alert("Please enter a valid deposit amount.");
+      return;
+    }
 
-    await writeContract(config, {
-      address: VUSDT_ADDRESS,
-      abi: VUSDT_ABI,
-      functionName: 'approve',
-      args: [VAULT_ADDRESS, amt],
-    });
+    try {
+      setIsDepositing(true);
 
-    await writeContract(config, {
-      address: VAULT_ADDRESS,
-      abi: VAULT_ABI,
-      functionName: 'deposit',
-      args: [amt],
-    });
+      const amt = parseUnits(depositAmount, 18);
 
-    setDepositAmount('');
-    await loadBalances();
+      console.log("check approval");
+      const allowance = await readContract(config, {
+        address: VUSDT_ADDRESS,
+        abi: VUSDT_ABI,
+        functionName: 'allowance',
+        args: [address, VAULT_ADDRESS],
+      });
+
+      console.log("Current allowance:", formatUnits(allowance, 18));
+      if (allowance < amt) {
+        await writeContract(config, {
+          address: VUSDT_ADDRESS,
+          abi: VUSDT_ABI,
+          functionName: 'approve',
+          args: [VAULT_ADDRESS, amt],
+        });
+      }
+ 
+      console.log("Depositing");
+      await writeContract(config, {
+        address: VAULT_ADDRESS,
+        abi: VAULT_ABI,
+        functionName: 'depositCollateral',
+        args: [amt],
+      });
+
+      console.log("Deposit successful");
+      setDepositAmount('');
+      await loadBalances();
+    } catch (error) {
+        console.error("Deposit failed:", error);
+        alert("Deposit failed. Check console for details.");
+    } finally {
+      setIsDepositing(false);
+    }
   };
+
 
   const handleWithdraw = async () => {
-    const amt = parseUnits(withdrawAmount, 18);
+    if (!withdrawAmount || isNaN(Number(withdrawAmount)) || Number(withdrawAmount) <= 0) {
+      alert("Please enter a valid withdrawal amount.");
+      return;
+    }
 
-    await writeContract(config, {
-      address: VAULT_ADDRESS,
-      abi: VAULT_ABI,
-      functionName: 'withdraw',
-      args: [amt],
-    });
+    try {
+      setIsWithdrawing(true);
 
-    setWithdrawAmount('');
-    await loadBalances();
+      const amt = parseUnits(withdrawAmount, 18);
+
+      console.log("Withdrawing");
+      await writeContract(config, {
+        address: VAULT_ADDRESS,
+        abi: VAULT_ABI,
+        functionName: 'withdrawCollateral',
+        args: [amt],
+      });
+
+      console.log("Withdraw successful");
+      setWithdrawAmount('');
+      await loadBalances();
+    } catch (error) {
+      console.error("Withdrawal failed:", error);
+      alert("Withdrawal failed. Check console for details.");
+    } finally {
+      setIsWithdrawing(false);
+    }
   };
+
 
   useEffect(() => {
     if (address) loadBalances();
-  }, [address]);
+  }, [address, handleAirdrop, handleDeposit, handleWithdraw]);
 
 
   return (
@@ -141,24 +191,33 @@ export default function VaultPage() {
             <CardBody className="space-y-4">
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground-500">ETH Balance</span>
+                  <span className="text-sm text-foreground-500">Deposited Balance</span>
                   <Chip color="primary" variant="flat" size="sm">
-                    {parseFloat(ethBalance).toFixed(4)} ETH
+                    {parseFloat(userCollateral.deposited).toFixed(4)} vUSDT
                   </Chip>
                 </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-foreground-500">Locked Balance</span>
+                  <Chip color="primary" variant="flat" size="sm">
+                    {parseFloat(userCollateral.locked).toFixed(4)} vUSDT
+                  </Chip>
+                </div>
+
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-foreground-500">vUSDT Balance</span>
                   <Chip color="secondary" variant="flat" size="sm">
-                    {parseFloat(vusdtBalance).toFixed(2)} vUSDT
+                    {parseFloat(vusdtBalance).toFixed(4)} vUSDT
                   </Chip>
                 </div>
               </div>
+
               <Divider />
               <div className="bg-default-100 p-4 rounded-lg">
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-foreground-500">Vault Balance</span>
                   <span className="font-semibold text-lg text-success">
-                    {parseFloat(vaultBalance).toFixed(2)} vUSDT
+                    {parseFloat(userCollateral.available).toFixed(4)} vUSDT
                   </span>
                 </div>
               </div>
@@ -194,6 +253,7 @@ export default function VaultPage() {
                     placeholder="Enter deposit amount"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
+                    onFocus={() => setActiveField('deposit')}
                     size="lg"
                   />
                   <Button
@@ -204,7 +264,7 @@ export default function VaultPage() {
                     className="w-full"
                     isDisabled={!depositAmount || parseFloat(depositAmount) <= 0}
                   >
-                    Deposit
+                    {isDepositing ? "Depositing..." : "Deposit"}
                   </Button>
                 </div>
 
@@ -220,6 +280,7 @@ export default function VaultPage() {
                     placeholder="Enter withdraw amount"
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
+                    onFocus={() => setActiveField('withdraw')}
                     size="lg"
                   />
                   <Button
@@ -231,7 +292,7 @@ export default function VaultPage() {
                     className="w-full"
                     isDisabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0}
                   >
-                    Withdraw
+                    {isWithdrawing ? "Withdrawing..." : "Withdraw"}
                   </Button>
                 </div>
               </div>
@@ -243,28 +304,72 @@ export default function VaultPage() {
                   <Button
                     size="sm"
                     variant="flat"
-                    onPress={() => setDepositAmount((parseFloat(vusdtBalance) * 0.25).toString())}
+                    onPress={() => {
+                      const value =
+                        activeField === 'deposit'
+                          ? (parseFloat(vusdtBalance) * 0.25).toString()
+                          : (parseFloat(userCollateral.deposited) * 0.25).toString();
+
+                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+
+                        activeField === 'deposit'
+                          ? setDepositAmount(value)
+                          : setWithdrawAmount(value);
+                    }}
                   >
                     25%
                   </Button>
                   <Button
                     size="sm"
                     variant="flat"
-                    onPress={() => setDepositAmount((parseFloat(vusdtBalance) * 0.5).toString())}
+                    onPress={() => {
+                      const value =
+                        activeField === 'deposit'
+                          ? (parseFloat(vusdtBalance) * 0.5).toString()
+                          : (parseFloat(userCollateral.deposited) * 0.5).toString();
+
+                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+
+                        activeField === 'deposit'
+                          ? setDepositAmount(value)
+                          : setWithdrawAmount(value);
+                    }}
                   >
                     50%
                   </Button>
                   <Button
                     size="sm"
                     variant="flat"
-                    onPress={() => setDepositAmount((parseFloat(vusdtBalance) * 0.75).toString())}
+                    onPress={() => {
+                      const value =
+                        activeField === 'deposit'
+                          ? (parseFloat(vusdtBalance) * 0.75).toString()
+                          : (parseFloat(userCollateral.deposited) * 0.75).toString();
+
+                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+
+                        activeField === 'deposit'
+                          ? setDepositAmount(value)
+                          : setWithdrawAmount(value);
+                    }}
                   >
                     75%
                   </Button>
                   <Button
                     size="sm"
                     variant="flat"
-                    onPress={() => setDepositAmount(vusdtBalance)}
+                    onPress={() => {
+                      const value =
+                        activeField === 'deposit'
+                          ? parseFloat(vusdtBalance).toString()
+                          : parseFloat(userCollateral.deposited).toString();
+
+                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+
+                        activeField === 'deposit'
+                          ? setDepositAmount(value)
+                          : setWithdrawAmount(value);
+                    }}
                   >
                     Max
                   </Button>
