@@ -96,7 +96,6 @@ interface IPositionNFT is IERC721 {
      * @return entryTimestamp Entry timestamp
      * @return entryFundingRate Entry funding rate
      * @return isLong Whether it's a long position
-     * @return isOpen Whether the position is open
      * @return symbol Position symbol
      */
     function getPosition(uint256 tokenId) 
@@ -110,7 +109,6 @@ interface IPositionNFT is IERC721 {
             uint256, // entryTimestamp
             int256,  // entryFundingRate
             bool,    // isLong
-            bool,    // isOpen
             string memory // symbol
         );
 
