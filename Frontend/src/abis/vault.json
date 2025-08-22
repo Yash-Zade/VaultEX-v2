@@ -5,6 +5,11 @@
 				"internalType": "address",
 				"name": "_vUSDT",
 				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_initialSupply",
+				"type": "uint256"
 			}
 		],
 		"stateMutability": "nonpayable",
@@ -169,7 +174,7 @@
 				"type": "uint256"
 			}
 		],
-		"name": "absorbLiquidatedCollateral",
+		"name": "absorbLoss",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -275,6 +280,24 @@
 		"type": "function"
 	},
 	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_user",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_amount",
+				"type": "uint256"
+			}
+		],
+		"name": "payOutProfit",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"inputs": [],
 		"name": "renounceOwnership",
 		"outputs": [],
@@ -290,24 +313,6 @@
 			}
 		],
 		"name": "setPositionManager",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "_to",
-				"type": "address"
-			},
-			{
-				"internalType": "uint256",
-				"name": "_amount",
-				"type": "uint256"
-			}
-		],
-		"name": "transferCollateral",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
