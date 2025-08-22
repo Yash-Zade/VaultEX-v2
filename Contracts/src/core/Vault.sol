@@ -38,8 +38,9 @@ contract Vault is Ownable {
     }
 
     // Set token address during deployment
-    constructor(address _vUSDT) Ownable(msg.sender) {
+    constructor(address _vUSDT, uint _initialSupply) Ownable(msg.sender) {
         vUSDT = IERC20(_vUSDT);
+        totalDeposits += _initialSupply;
     }
     
     // Set position manager address
@@ -107,32 +108,24 @@ contract Vault is Ownable {
         emit CollateralUnlocked(_user, _amount);
     }
 
-    // Transfer locked collateral from contract to user
-    function transferCollateral(address _to, uint _amount) external onlyPositionManager() {
-        require(_amount > 0, "Amount should be greater than 0");
-        require(totalLocked >= _amount, "Insufficient locked balance to unlock");
-
-        totalLocked -= _amount;
-        userData[_to].availableBalance += _amount;
-
+    //Pays profit to the user
+    function payOutProfit(address _user, uint _amount) external onlyPositionManager {
+        require(_user != address(0), "Invalid User");
+        require(_amount != 0, "Invalid amount to pay out profit");
+        require(_amount <= totalDeposits, "Insufficient fund to pay out");
+        totalDeposits -= _amount;
+        userData[_user].availableBalance += _amount;
         utilizationRate = (totalLocked * 10000) / totalDeposits;
-
-        emit CollateralTransferred(address(this), _to, _amount);
     }
 
-    // Called when a user's position is liquidated
-    function absorbLiquidatedCollateral(address _user, uint _amount) external onlyPositionManager {
-        require(_amount > 0, "Amount must be greater than 0");
-        require(userData[_user].lockedBalance >= _amount, "Insufficient locked balance");
-
-        userData[_user].lockedBalance -= _amount;
-        totalLocked -= _amount;
-
+    //Absorb loss from the user
+    function absorbLoss(address _user, uint _amount) external onlyPositionManager {
+        require(_user != address(0), "Invalid User");
+        require(_amount != 0, "Invalid amount to absorb out profit");
+        totalDeposits += _amount;
+        userData[_user].availableBalance -= _amount;
         utilizationRate = (totalLocked * 10000) / totalDeposits;
-
-        emit CollateralTransferred(_user, address(this), _amount);
     }
-
 
     // Get caller's balances
     function getUserCollateral() external view returns(UserData memory) {
