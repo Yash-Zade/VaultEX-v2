@@ -42,7 +42,8 @@ contract VirtualAMM is Ownable{
     function updateReserve(uint _amount, bool _isLong) external onlyPositionManager(){
         require(_amount > 0, "Amount should be greater than 0");
         require(virtualReserveVETH > 0 && virtualReserveVUSDT > 0, "invalid reserves");
-
+        
+        _amount /= 1e10;
         uint256 k = virtualReserveVETH * virtualReserveVUSDT;
 
         if (_isLong) {
