@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-import "../interfaces/IPriceFeed.sol";
 import "../interfaces/IPositionNFT.sol";
 import "../interfaces/IVirtualAMM.sol";
 import "../interfaces/IVault.sol";
@@ -26,7 +25,6 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
     uint public lastFundingTime;
 
-    IPriceFeed public priceFeed;
     IPositionNFT public positionNFT;
     IVirtualAMM public virtualAMM;
     IVault public vault;
@@ -68,8 +66,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
     event FundingRateUpdated(int256 newRate, int256 accumulated);
     event EmergencyPauseToggled(bool paused);
 
-    constructor(address _priceFeed, address _positionNFT, address _virtualAMM, address _vault ) Ownable(msg.sender){
-        priceFeed = IPriceFeed(_priceFeed);
+    constructor(address _positionNFT, address _virtualAMM, address _vault ) Ownable(msg.sender){
         positionNFT = IPositionNFT(_positionNFT);
         virtualAMM = IVirtualAMM(_virtualAMM);
         vault = IVault(_vault);
@@ -81,26 +78,18 @@ contract PositionManager is ReentrancyGuard, Ownable{
         require(_leverage > 0 && _leverage <= MAX_LEVERAGE, "Invalid leverage");
         require(!positions[msg.sender].isOpen, "Position already open");
 
-        // Fees are taken from margin, not added
-        uint256 fees = ((_collateral * _leverage) * TRADING_FEES) / 1e6; // 500/1e6 = 0.05%
-        require(_collateral > fees, "Insufficient after fees");
-
-        uint256 netCollateral = _collateral - fees;
-
-        vault.lockCollateral(msg.sender, netCollateral);
-        uint amount = netCollateral * _leverage;
+        vault.lockCollateral(msg.sender, _collateral);
+        uint amount = _collateral * _leverage;
         (uint256 entryPrice, bool isValid) = virtualAMM.getCurrentPrice();
         require(isValid, "Invalid price");
 
-        int entryFundingRate = (virtualAMM.calculateFundingRate());
-
         positions[msg.sender] = Position({
             user: msg.sender,
-            collateral: netCollateral,
+            collateral: _collateral,
             entryPrice: entryPrice,
             exitPrice: 0,
             positionSize: amount,
-            entryFundingRate: entryFundingRate,
+            entryFundingRate: fundingRateAccumulated,
             leverage: _leverage,
             isLong: _isLong,
             isOpen: true
@@ -108,18 +97,18 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
         if (_isLong) {
             totalLong += (amount);
-            totalLongCollateral += netCollateral;
+            totalLongCollateral += _collateral;
         } else {
             totalShort += (amount);
-            totalShortCollateral += netCollateral;
+            totalShortCollateral += _collateral;
         }
 
          // record NFT for open position
-        positionNFT.mintPosition(msg.sender, netCollateral, _leverage, entryPrice, entryFundingRate, _isLong);
+        positionNFT.mintPosition(msg.sender, _collateral, _leverage, entryPrice, fundingRateAccumulated, _isLong);
 
         virtualAMM.updateReserve(amount, _isLong);
 
-        emit PositionOpened(msg.sender, netCollateral, entryPrice, _leverage, entryFundingRate, _isLong);
+        emit PositionOpened(msg.sender, _collateral, entryPrice, _leverage, fundingRateAccumulated, _isLong);
 
     }
 
@@ -130,7 +119,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         (uint256 currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
         require(isValid, "Invalid price");
 
-        uint256 notionalSize = collateral * leverage;
+        uint256 amount = collateral * leverage;
         uint256 fees = (collateral * TRADING_FEES) / 1e6;
         
         int256 pnl = _calculatePnl(isLong, leverage, collateral, entryPrice, currentPrice);
@@ -139,10 +128,10 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
 
         if (isLong) {
-            totalLong -= notionalSize;
+            totalLong -= amount;
             totalLongCollateral -= collateral;
         } else {
-            totalShort -= notionalSize;
+            totalShort -= amount;
             totalShortCollateral -= collateral;
         }
 
@@ -152,10 +141,10 @@ contract PositionManager is ReentrancyGuard, Ownable{
         if (settlementAmount > 0) {
             vault.payOutProfit(msg.sender, uint256(settlementAmount));
         } else {
-            vault.absorbLoss(msg.sender, collateral);
+            vault.absorbLoss(msg.sender, uint256(-settlementAmount));
         }
         delete positions[msg.sender];
-        virtualAMM.updateReserve(collateral, !isLong);
+        virtualAMM.updateReserve(amount, !isLong);
 
         emit PositionClosed(tokenId, msg.sender, pnl, fundingPayment, fees);
     }
@@ -177,12 +166,12 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
         int256 remainingValue = int256(collateral) + pnl + fundingPayment;
 
-        uint256 notionalSize = collateral * leverage;
+        uint256 amount = collateral * leverage;
         if (isLong) {
-            totalLong -= notionalSize;
+            totalLong -= amount;
             totalLongCollateral -= collateral;
         } else {
-            totalShort -= notionalSize;
+            totalShort -= amount;
             totalShortCollateral -= collateral;
         }
 
@@ -193,7 +182,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
             vault.payOutProfit(owner, uint256(remainingValue));
         }
         else{
-            vault.absorbLoss(owner, uint256(remainingValue));
+            vault.absorbLoss(owner, uint256(-remainingValue));
         }
 
         delete positions[msg.sender];
@@ -252,10 +241,8 @@ contract PositionManager is ReentrancyGuard, Ownable{
         } else {
             priceChangePercentage = 1e18 - (current * 1e18) / entry;
         }
-
-        int256 pnlPercent = (priceChangePercentage * int256(uint256(leverage))) / 1e18;
-        int256 pnl = (int256(collateral) * pnlPercent) / 1e18;
-        
+        int256 leveragedPercentage = (priceChangePercentage * int256(uint256(leverage)));
+        int256 pnl = (int256(collateral) * leveragedPercentage) / 1e18;
         return pnl;
     }
 
@@ -283,7 +270,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         int256 pnl = _calculatePnl(isLong, leverage, collateral, entryPrice, currentPrice);
         int256 fundingPayment = _calculateFundingPayment(isLong, collateral, entryFundingRate);
 
-        int256 remainingValue = int256(collateral) + pnl - fundingPayment;
+        int256 remainingValue = int256(collateral) + pnl + fundingPayment;
         int256 maintenanceMargin = int256(collateral * LIQUIDATION_THRESHOLD_BPS) / 10000;
 
         return remainingValue <= maintenanceMargin;
@@ -294,6 +281,6 @@ contract PositionManager is ReentrancyGuard, Ownable{
     }
 
     function getCurrentFundingRate() external view returns(int){
-        return virtualAMM.calculateFundingRate();
+        return fundingRateAccumulated;
     }
 }
