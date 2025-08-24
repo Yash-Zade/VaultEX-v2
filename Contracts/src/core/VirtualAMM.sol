@@ -8,7 +8,7 @@ contract VirtualAMM is Ownable{
     
     uint virtualReserveVETH;
     uint virtualReserveVUSDT;
-    uint constant PRICE_PRECISION = 1e8;
+    uint constant PRICE_PRECISION = 1e18;
     address positionManager;
     IPriceFeed priceFeed;
     
@@ -22,8 +22,8 @@ contract VirtualAMM is Ownable{
 
 
     constructor(uint _virtualReserveVETH, uint _virtualReserveVUSDT, address _priceFeed) Ownable(msg.sender){
-        virtualReserveVETH = _virtualReserveVETH;
-        virtualReserveVUSDT = _virtualReserveVUSDT;
+        virtualReserveVETH = _virtualReserveVETH * PRICE_PRECISION;
+        virtualReserveVUSDT = _virtualReserveVUSDT * PRICE_PRECISION;
         priceFeed = IPriceFeed(_priceFeed);
     }
 
@@ -43,7 +43,6 @@ contract VirtualAMM is Ownable{
         require(_amount > 0, "Amount should be greater than 0");
         require(virtualReserveVETH > 0 && virtualReserveVUSDT > 0, "invalid reserves");
         
-        _amount /= 1e10;
         uint256 k = virtualReserveVETH * virtualReserveVUSDT;
 
         if (_isLong) {
@@ -62,7 +61,7 @@ contract VirtualAMM is Ownable{
     }
 
     function setInitialPrice() external onlyOwner(){
-        uint price = uint(priceFeed.getLatestPrice());
+        uint price = uint(priceFeed.getLatestPrice()) * 1e10;
         uint k = virtualReserveVETH * virtualReserveVUSDT;
 
         uint256 vETH = sqrt(k * PRICE_PRECISION / price);
@@ -74,7 +73,7 @@ contract VirtualAMM is Ownable{
     }
 
     function calculateFundingRate() external view onlyPositionManager returns (int256 fundingRateBps) {
-        uint256 spotPrice = uint256(priceFeed.getLatestPrice());
+        uint256 spotPrice = uint256(priceFeed.getLatestPrice()) * 1e10;
 
         (uint256 vAMMPrice, bool isValid) = getCurrentPrice();
         if (!isValid || spotPrice == 0) {
