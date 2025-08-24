@@ -194,28 +194,10 @@
 	},
 	{
 		"inputs": [],
-		"name": "getTotalLiquidity",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
 		"name": "getUserCollateral",
 		"outputs": [
 			{
 				"components": [
-					{
-						"internalType": "uint256",
-						"name": "depositedBalance",
-						"type": "uint256"
-					},
 					{
 						"internalType": "uint256",
 						"name": "lockedBalance",
@@ -237,8 +219,18 @@
 	},
 	{
 		"inputs": [],
-		"name": "getUtilizationRate",
+		"name": "getVaultAssets",
 		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			},
 			{
 				"internalType": "uint256",
 				"name": "",
