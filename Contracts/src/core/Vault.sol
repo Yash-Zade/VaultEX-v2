@@ -8,7 +8,6 @@ contract Vault is Ownable {
 
     // User balances for deposit, locked, and available
     struct UserData {
-        uint depositedBalance;
         uint lockedBalance;
         uint availableBalance;
     }
@@ -55,10 +54,11 @@ contract Vault is Ownable {
         require(vUSDT.allowance(msg.sender, address(this)) >= _amount);
         require(vUSDT.transferFrom(msg.sender, address(this), _amount), "Unable to transfer");
 
-        userData[msg.sender].depositedBalance += _amount;
         userData[msg.sender].availableBalance += _amount;
 
         totalDeposits += _amount;
+
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
 
         emit CollateralDeposited(msg.sender, _amount);
     }
@@ -69,11 +69,11 @@ contract Vault is Ownable {
         require(userData[msg.sender].availableBalance >= _amount, "Insufficient available balance");
 
         userData[msg.sender].availableBalance -= _amount;
-        userData[msg.sender].depositedBalance -= _amount;
-
         totalDeposits -= _amount;
 
         require(vUSDT.transfer(msg.sender, _amount), "Transfer failed");
+
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
 
         emit CollateralWithdrawn(msg.sender, _amount);
     }
@@ -89,7 +89,7 @@ contract Vault is Ownable {
 
         totalLocked += _amount;
 
-        utilizationRate = (totalLocked * 10000) / totalDeposits;
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
 
         emit CollateralLocked(_user, _amount);
     }
@@ -103,7 +103,7 @@ contract Vault is Ownable {
         totalLocked -= _amount;
         userData[_user].availableBalance += _amount;
 
-        utilizationRate = (totalLocked * 10000) / totalDeposits;
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
 
         emit CollateralUnlocked(_user, _amount);
     }
@@ -115,16 +115,17 @@ contract Vault is Ownable {
         require(_amount <= totalDeposits, "Insufficient fund to pay out");
         totalDeposits -= _amount;
         userData[_user].availableBalance += _amount;
-        utilizationRate = (totalLocked * 10000) / totalDeposits;
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
     }
 
     //Absorb loss from the user
     function absorbLoss(address _user, uint _amount) external onlyPositionManager {
         require(_user != address(0), "Invalid User");
         require(_amount != 0, "Invalid amount to absorb out profit");
+        require(userData[_user].availableBalance >= _amount, "Infufficient funds");
         totalDeposits += _amount;
         userData[_user].availableBalance -= _amount;
-        utilizationRate = (totalLocked * 10000) / totalDeposits;
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
     }
 
     // Get caller's balances
@@ -132,14 +133,8 @@ contract Vault is Ownable {
         return userData[msg.sender];
     }
 
-    // Get total deposits in vault
-    function getTotalLiquidity() external view returns(uint) {
-        return totalDeposits;
-    }
-
-    // Get current utilization rate (0–10000 for 0–100%)
-    function getUtilizationRate() external view returns (uint256) {
-        return utilizationRate;
+    function getVaultAssets() external view returns(uint, uint, uint){
+        return(totalDeposits, totalLocked, utilizationRate);
     }
 
     // Fallback function - handles unknown calls
