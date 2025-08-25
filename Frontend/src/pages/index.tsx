@@ -4,8 +4,6 @@ import { Code } from "@heroui/code";
 import { button as buttonStyles } from "@heroui/theme";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Chip } from "@heroui/chip";
-
-import { siteConfig } from "@/config/site";
 import { title, subtitle } from "@/components/primitives";
 import { TrendingUp, Zap, Target, Shield, BarChart3, Wallet } from "lucide-react";
 import DefaultLayout from "@/layouts/default";
