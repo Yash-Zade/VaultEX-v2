@@ -5,7 +5,7 @@ import { Input } from "@heroui/input";
 import { Chip } from "@heroui/chip";
 import { Divider } from "@heroui/divider";
 import { Wallet, ArrowUpCircle, ArrowDownCircle, Gift } from "lucide-react";
-import {useAccount} from "wagmi";
+import { useAccount } from "wagmi";
 import { readContract, writeContract, } from '@wagmi/core';
 import { parseUnits, formatUnits } from "viem";
 import { config } from "@/config/wagmi-config";
@@ -26,8 +26,7 @@ export default function VaultPage() {
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [activeField, setActiveField] = useState<'deposit' | 'withdraw'>('deposit');
-  const [userCollateral, setUserCollateral] = useState({
-    deposited: '',
+  const [userCollaterals, setUserCollaterals] = useState({
     locked: '',
     available: '',
   });
@@ -53,11 +52,12 @@ export default function VaultPage() {
         }),
       ]);
 
-      setUserCollateral({
-        deposited: formatUnits(userCollateral.depositedBalance, 18),
+      setUserCollaterals({
         locked: formatUnits(userCollateral.lockedBalance, 18),
         available: formatUnits(userCollateral.availableBalance, 18),
       });
+
+      console.log(userCollateral);
 
       setVusdtBalance(formatUnits(vusdtBal as bigint, 18));
 
@@ -73,9 +73,9 @@ export default function VaultPage() {
       abi: VUSDT_ABI,
       functionName: 'airDrop',
       args: [address],
-      gas: BigInt(60000), // conservative gas limit
-      maxFeePerGas: BigInt(30e9), // 30 Gwei
-      maxPriorityFeePerGas: BigInt(2e9), // 2 Gwei
+      // gas: BigInt(60000), // conservative gas limit
+      // maxFeePerGas: BigInt(30e9), // 30 Gwei
+      // maxPriorityFeePerGas: BigInt(2e9), // 2 Gwei
     });
     await loadBalances();
   };
@@ -109,7 +109,7 @@ export default function VaultPage() {
           args: [VAULT_ADDRESS, amt],
         });
       }
- 
+
       console.log("Depositing");
       await writeContract(config, {
         address: VAULT_ADDRESS,
@@ -122,8 +122,8 @@ export default function VaultPage() {
       setDepositAmount('');
       await loadBalances();
     } catch (error) {
-        console.error("Deposit failed:", error);
-        alert("Deposit failed. Check console for details.");
+      console.error("Deposit failed:", error);
+      alert("Deposit failed. Check console for details.");
     } finally {
       setIsDepositing(false);
     }
@@ -163,13 +163,13 @@ export default function VaultPage() {
 
   useEffect(() => {
     if (address) loadBalances();
-  }, [address, handleAirdrop, handleDeposit, handleWithdraw]);
+  }, [address]);
 
 
   return (
     <div className="min-h-screen p-6 bg-background">
       <div className="max-w-5xl mx-auto space-y-6">
-        
+
         {/* Header */}
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold">
@@ -179,7 +179,7 @@ export default function VaultPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
+
           {/* Wallet Overview */}
           <Card className="lg:col-span-1">
             <CardHeader>
@@ -191,23 +191,16 @@ export default function VaultPage() {
             <CardBody className="space-y-4">
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground-500">Deposited Balance</span>
-                  <Chip color="primary" variant="flat" size="sm">
-                    {parseFloat(userCollateral.deposited).toFixed(4)} vUSDT
+                  <span className="text-sm text-foreground-500">Available Balance</span>
+                  <Chip color="success" variant="flat" size="sm">
+                    {parseFloat(userCollaterals.available).toFixed(4)} vUSDT
                   </Chip>
                 </div>
 
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-foreground-500">Locked Balance</span>
-                  <Chip color="primary" variant="flat" size="sm">
-                    {parseFloat(userCollateral.locked).toFixed(4)} vUSDT
-                  </Chip>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground-500">vUSDT Balance</span>
-                  <Chip color="secondary" variant="flat" size="sm">
-                    {parseFloat(vusdtBalance).toFixed(4)} vUSDT
+                  <Chip color="danger" variant="flat" size="sm">
+                    {parseFloat(userCollaterals.locked).toFixed(4)} vUSDT
                   </Chip>
                 </div>
               </div>
@@ -215,9 +208,9 @@ export default function VaultPage() {
               <Divider />
               <div className="bg-default-100 p-4 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground-500">Vault Balance</span>
+                  <span className="text-sm text-foreground-500">vUSDT Balance</span>
                   <span className="font-semibold text-lg text-success">
-                    {parseFloat(userCollateral.available).toFixed(4)} vUSDT
+                    {parseFloat(vusdtBalance).toFixed(4)} vUSDT
                   </span>
                 </div>
               </div>
@@ -230,6 +223,16 @@ export default function VaultPage() {
               >
                 Airdrop 1000 vUSDT
               </Button>
+              <Button
+                color="secondary"
+                size="lg"
+                onPress={loadBalances}
+                startContent={<Wallet size={18} />}
+                className="w-full"
+              >
+                Load Balances
+              </Button>
+
             </CardBody>
           </Card>
 
@@ -239,7 +242,7 @@ export default function VaultPage() {
               <h3 className="text-xl font-semibold">Vault Operations</h3>
             </CardHeader>
             <CardBody className="space-y-6">
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Deposit Section */}
                 <div className="space-y-4">
@@ -308,13 +311,13 @@ export default function VaultPage() {
                       const value =
                         activeField === 'deposit'
                           ? (parseFloat(vusdtBalance) * 0.25).toString()
-                          : (parseFloat(userCollateral.deposited) * 0.25).toString();
+                          : (parseFloat(userCollaterals.available) * 0.25).toString();
 
-                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+                      activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
 
-                        activeField === 'deposit'
-                          ? setDepositAmount(value)
-                          : setWithdrawAmount(value);
+                      activeField === 'deposit'
+                        ? setDepositAmount(value)
+                        : setWithdrawAmount(value);
                     }}
                   >
                     25%
@@ -326,13 +329,13 @@ export default function VaultPage() {
                       const value =
                         activeField === 'deposit'
                           ? (parseFloat(vusdtBalance) * 0.5).toString()
-                          : (parseFloat(userCollateral.deposited) * 0.5).toString();
+                          : (parseFloat(userCollaterals.available) * 0.5).toString();
 
-                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+                      activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
 
-                        activeField === 'deposit'
-                          ? setDepositAmount(value)
-                          : setWithdrawAmount(value);
+                      activeField === 'deposit'
+                        ? setDepositAmount(value)
+                        : setWithdrawAmount(value);
                     }}
                   >
                     50%
@@ -344,13 +347,13 @@ export default function VaultPage() {
                       const value =
                         activeField === 'deposit'
                           ? (parseFloat(vusdtBalance) * 0.75).toString()
-                          : (parseFloat(userCollateral.deposited) * 0.75).toString();
+                          : (parseFloat(userCollaterals.available) * 0.75).toString();
 
-                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+                      activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
 
-                        activeField === 'deposit'
-                          ? setDepositAmount(value)
-                          : setWithdrawAmount(value);
+                      activeField === 'deposit'
+                        ? setDepositAmount(value)
+                        : setWithdrawAmount(value);
                     }}
                   >
                     75%
@@ -362,13 +365,13 @@ export default function VaultPage() {
                       const value =
                         activeField === 'deposit'
                           ? parseFloat(vusdtBalance).toString()
-                          : parseFloat(userCollateral.deposited).toString();
+                          : (userCollaterals.available).toString();
 
-                        activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
+                      activeField === 'deposit' ? setWithdrawAmount("") : setDepositAmount("");
 
-                        activeField === 'deposit'
-                          ? setDepositAmount(value)
-                          : setWithdrawAmount(value);
+                      activeField === 'deposit'
+                        ? setDepositAmount(value)
+                        : setWithdrawAmount(value);
                     }}
                   >
                     Max
