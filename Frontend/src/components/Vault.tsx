@@ -221,7 +221,7 @@ export default function VaultPage() {
                 startContent={<Gift size={18} />}
                 className="w-full"
               >
-                Airdrop 1000 vUSDT
+                Airdrop 10,000 vUSDT
               </Button>
               <Button
                 color="secondary"
