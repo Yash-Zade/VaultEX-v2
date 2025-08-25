@@ -50,8 +50,8 @@ export default function VaultPage() {
           functionName: 'getUserCollateral',
           account: address,
         }),
-      ]);
-
+      ])as [bigint, { lockedBalance: bigint; availableBalance: bigint }];
+      
       setUserCollaterals({
         locked: formatUnits(userCollateral.lockedBalance, 18),
         available: formatUnits(userCollateral.availableBalance, 18),
@@ -98,9 +98,8 @@ export default function VaultPage() {
         abi: VUSDT_ABI,
         functionName: 'allowance',
         args: [address, VAULT_ADDRESS],
-      });
+      })as bigint;
 
-      console.log("Current allowance:", formatUnits(allowance, 18));
       if (allowance < amt) {
         await writeContract(config, {
           address: VUSDT_ADDRESS,

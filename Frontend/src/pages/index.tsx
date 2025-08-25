@@ -39,10 +39,10 @@ export default function IndexPage() {
             Start Trading
           </Link>
           <Link
-            className={buttonStyles({ 
-              color: "secondary", 
-              variant: "bordered", 
-              radius: "full" 
+            className={buttonStyles({
+              color: "secondary",
+              variant: "bordered",
+              radius: "full"
             })}
             href={"/docs"}
           >
@@ -83,10 +83,10 @@ export default function IndexPage() {
             </CardHeader>
             <CardBody className="pt-0">
               <p className="text-sm text-gray-600">
-                Amplify your trading potential with leverage up to 100× on major cryptocurrency pairs.
+                Amplify your trading potential with leverage up to 50x on major cryptocurrency pairs.
               </p>
               <Chip color="secondary" variant="flat" size="sm" className="mt-2 w-fit">
-                Up to 100× leverage
+                Up to 50× leverage
               </Chip>
             </CardBody>
           </Card>

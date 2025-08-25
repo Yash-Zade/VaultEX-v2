@@ -29,7 +29,7 @@ export default function TradingPage() {
   const { address } = useAccount();
   const [baseAmount, setBaseAmount] = useState(10);
   const [leverage, setLeverage] = useState(10);
-  const [currentPrice, setCurrentPrice] = useState();
+  const [currentPrice, setCurrentPrice] = useState(0);
   const [fundingRate, setFundingRate] = useState(0);
   const [position, setPosition] = useState("");
   const [priceChange, setPriceChange] = useState(0);
@@ -42,7 +42,13 @@ export default function TradingPage() {
     totalShortCollateral: 0,
     fundingRateAccumulated: 0
   });
-  const [priceData, setPriceData] = useState([]);
+  type PricePoint = {
+    time: string;
+    price: number;
+    timestamp: number;
+  };
+
+  const [priceData, setPriceData] = useState<PricePoint[]>([]);
 
   // Add this function to generate and update price data
   const updatePriceData = () => {
@@ -103,8 +109,9 @@ export default function TradingPage() {
       abi: VAMM_ABI,
       functionName: "getCurrentPrice",
       account: address,
-    })
-    setCurrentPrice(Number(price[0]) / 1e18);
+    }) as [bigint, boolean];
+
+    setCurrentPrice((Number(price[0])) / 1e18);
     return price;
   };
 
@@ -125,7 +132,7 @@ export default function TradingPage() {
         abi: POSITION_MANAGER_ABI,
         functionName: "getPositionStats",
         account: address,
-      });
+      }) as [bigint, bigint, bigint, bigint, bigint];
 
       // Assuming the contract returns [totalLong, totalShort, totalLongCollateral, totalShortCollateral, fundingRateAccumulated]
       setPositionStats({
@@ -143,7 +150,7 @@ export default function TradingPage() {
     }
   };
 
-  const openPosition = async (isLong) => {
+  const openPosition = async (isLong: boolean) => {
     const amount = parseUnits(baseAmount.toString(), 18);
     console.log(amount);
     try {
@@ -244,7 +251,7 @@ export default function TradingPage() {
                   <Activity className="w-5 h-5 text-success" />
                   <h3 className="text-xl font-bold">ETH/USDT</h3>
                 </div>
-                <Badge color="success" variant="dot">Live</Badge>
+                <Badge color="success" variant="solid">Live</Badge>
               </div>
             </CardHeader>
             <CardBody className="space-y-4">
@@ -470,7 +477,7 @@ export default function TradingPage() {
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value) => [`$${(value / 1000).toFixed(0)}K`, 'Value']} />
+                    <Tooltip formatter={(value) => [`$${(Number(value) / 1000).toFixed(0)}K`, 'Value']} />
                   </PieChart>
                 </ResponsiveContainer>
 
@@ -513,7 +520,7 @@ export default function TradingPage() {
                   <YAxis stroke="#6b7280" />
                   <Tooltip
                     formatter={(value, name) => [
-                      `$${(value / 1000).toFixed(2)}K`,
+                      `$${(Number(value) / 1000).toFixed(2)}K`,
                       name === 'collateral' ? 'Collateral' : 'Position Value'
                     ]}
                   />
