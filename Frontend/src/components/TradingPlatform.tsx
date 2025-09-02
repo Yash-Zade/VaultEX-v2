@@ -9,12 +9,13 @@ import { Progress } from "@heroui/progress";
 import { Divider } from "@heroui/divider";
 import { TrendingUp, TrendingDown, Target, Zap, Activity, DollarSign } from "lucide-react";
 import { useAccount } from "wagmi";
-import { readContract, writeContract, } from '@wagmi/core';
+import { readContract, waitForTransactionReceipt, writeContract, } from '@wagmi/core';
 import { parseUnits } from 'ethers';
 import { config } from "@/config/wagmi-config";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts";
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { toast } from "react-toastify";
 
-import { Clock, Volume2 } from "lucide-react";
+import { Clock } from "lucide-react";
 
 import POSITION_MANAGER_ABI from "@/abis/positionManager.json";
 import VAMM_ABI from "@/abis/vamm.json";
@@ -42,6 +43,7 @@ export default function TradingPage() {
     totalShortCollateral: 0,
     fundingRateAccumulated: 0
   });
+
   type PricePoint = {
     time: string;
     price: number;
@@ -50,7 +52,7 @@ export default function TradingPage() {
 
   const [priceData, setPriceData] = useState<PricePoint[]>([]);
 
-  // Add this function to generate and update price data
+  // Update price data chart
   const updatePriceData = () => {
     const now = new Date();
     const newPoint = {
@@ -61,7 +63,6 @@ export default function TradingPage() {
 
     setPriceData(prev => {
       const updated = [...prev, newPoint];
-      // Keep only last 20 points
       return updated.slice(-20);
     });
   };
@@ -91,39 +92,53 @@ export default function TradingPage() {
       positions: positionStats.totalShort,
     }
   ];
+
   const longShortRatio = positionStats.totalLong / (positionStats.totalLong + positionStats.totalShort) * 100;
 
-
   const getPosition = async () => {
-    const price = await readContract(config, {
-      address: POSITION_NFT_ADDRESS,
-      abi: POSITION_NFT_ABI,
-      functionName: "getUserPositions",
-      args: [address],
-    })
-  }
+    try {
+      const price = await readContract(config, {
+        address: POSITION_NFT_ADDRESS,
+        abi: POSITION_NFT_ABI,
+        functionName: "getUserPositions",
+        args: [address],
+      });
+      return price;
+    } catch (error) {
+      console.error("Error fetching user position:", error);
+      return null;
+    }
+  };
 
   const getCurrentPrice = async () => {
-    const price = await readContract(config, {
-      address: VAMM_ADDRESS,
-      abi: VAMM_ABI,
-      functionName: "getCurrentPrice",
-      account: address,
-    }) as [bigint, boolean];
+    try {
+      const price = await readContract(config, {
+        address: VAMM_ADDRESS,
+        abi: VAMM_ABI,
+        functionName: "getCurrentPrice",
+        account: address,
+      }) as [bigint, boolean];
 
-    setCurrentPrice((Number(price[0])) / 1e18);
-    return price;
+      setCurrentPrice(Number(price[0]) / 1e18);
+      return price;
+    } catch (error) {
+      console.error("Error fetching current price:", error);
+    }
   };
 
   const getFundingRate = async () => {
-    const rate = await readContract(config, {
-      address: POSITION_MANAGER_ADDRESS,
-      abi: POSITION_MANAGER_ABI,
-      functionName: "getCurrentFundingRate",
-      account: address
-    })
-    setFundingRate(Number(rate) / 100);
-  }
+    try {
+      const rate = await readContract(config, {
+        address: POSITION_MANAGER_ADDRESS,
+        abi: POSITION_MANAGER_ABI,
+        functionName: "getCurrentFundingRate",
+        account: address
+      });
+      setFundingRate(Number(rate) / 100);
+    } catch (error) {
+      console.error("Error fetching funding rate:", error);
+    }
+  };
 
   const getPositionStats = async () => {
     try {
@@ -134,7 +149,6 @@ export default function TradingPage() {
         account: address,
       }) as [bigint, bigint, bigint, bigint, bigint];
 
-      // Assuming the contract returns [totalLong, totalShort, totalLongCollateral, totalShortCollateral, fundingRateAccumulated]
       setPositionStats({
         totalLong: Number(stats[0]) / 1e18,
         totalShort: Number(stats[1]) / 1e18,
@@ -151,39 +165,75 @@ export default function TradingPage() {
   };
 
   const openPosition = async (isLong: boolean) => {
+    if (!address) return;
     const amount = parseUnits(baseAmount.toString(), 18);
     console.log(amount);
+
     try {
-      await writeContract(config, {
+      const tx = await writeContract(config, {
         address: POSITION_MANAGER_ADDRESS,
         abi: POSITION_MANAGER_ABI,
         functionName: "openPosition",
         args: [amount, leverage, isLong],
         account: address,
-      })
+      });
 
-      isLong ? setPosition("long") : setPosition("short");
-      setIsOpen(true)
-    }
-    catch (error) {
+      toast.info("Transaction sent. Waiting for confirmation...");
+
+      const receipt = await waitForTransactionReceipt(config, { hash: tx });
+
+      if (receipt.status === "success") {
+        toast.success("Position opened successfully!");
+        isLong ? setPosition("long") : setPosition("short");
+        setIsOpen(true);
+        await getPositionStats();
+      } else {
+        toast.error("Opening position failed.");
+        setIsOpen(false);
+        setPosition("");
+      }
+    } catch (error) {
       setIsOpen(false);
       setPosition("");
       console.error("Error opening trade:", error);
+      toast.error("Opening position failed.");
     }
-  }
+  };
 
   const closePosition = async () => {
-    const id = await getPosition();
+    if (!address) return;
+    try {
+      const id = await getPosition();
+      if (!id) {
+        toast.error("No position found to close.");
+        return;
+      }
 
-    await writeContract(config, {
-      address: POSITION_MANAGER_ADDRESS,
-      abi: POSITION_MANAGER_ABI,
-      functionName: "closePosition",
-      args: [id],
-      account: address,
-    })
+      const tx = await writeContract(config, {
+        address: POSITION_MANAGER_ADDRESS,
+        abi: POSITION_MANAGER_ABI,
+        functionName: "closePosition",
+        args: [id],
+        account: address,
+      });
 
-  }
+      toast.info("Closing position... Waiting for confirmation.");
+
+      const receipt = await waitForTransactionReceipt(config, { hash: tx });
+
+      if (receipt.status === "success") {
+        toast.success("Position closed successfully!");
+        setIsOpen(false);
+        setPosition("");
+        await getPositionStats();
+      } else {
+        toast.error("Closing position failed.");
+      }
+    } catch (error) {
+      console.error("Error closing position:", error);
+      toast.error("Closing position failed.");
+    }
+  };
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -198,11 +248,10 @@ export default function TradingPage() {
     return () => clearInterval(intervalId);
   }, []);
 
-
-
   const positionSize = baseAmount * leverage;
   const priceChangePercent = (priceChange / Number(currentPrice)) * 100;
   const leverageColor = leverage <= 10 ? "success" : leverage <= 25 ? "warning" : "danger";
+
 
   return (
 
@@ -381,6 +430,7 @@ export default function TradingPage() {
                     </Chip>
                   </div>
                   <Slider
+                    aria-label="Leverage"
                     size="lg"
                     step={1}
                     minValue={1}
@@ -396,6 +446,7 @@ export default function TradingPage() {
                       { value: 50, label: "50x" },
                     ]}
                   />
+
                 </div>
               </div>
 

@@ -6,12 +6,12 @@ import { Chip } from "@heroui/chip";
 import { Divider } from "@heroui/divider";
 import { Wallet, ArrowUpCircle, ArrowDownCircle, Gift } from "lucide-react";
 import { useAccount } from "wagmi";
-import { readContract, writeContract, } from '@wagmi/core';
+import { readContract, waitForTransactionReceipt, writeContract, } from '@wagmi/core';
 import { parseUnits, formatUnits } from "viem";
 import { config } from "@/config/wagmi-config";
+import { toast } from "react-toastify";
 
 
-// Replace with your real addresses & ABIs
 import VUSDT_ABI from "@/abis/vusdt.json";
 import VAULT_ABI from "@/abis/vault.json";
 
@@ -31,7 +31,6 @@ export default function VaultPage() {
     available: '',
   });
 
-
   const loadBalances = async () => {
     if (!address) return;
 
@@ -43,122 +42,151 @@ export default function VaultPage() {
           functionName: 'balanceOf',
           args: [address],
         }),
-
         readContract(config, {
           address: VAULT_ADDRESS,
           abi: VAULT_ABI,
           functionName: 'getUserCollateral',
           account: address,
         }),
-      ])as [bigint, { lockedBalance: bigint; availableBalance: bigint }];
-      
+      ]) as [bigint, { lockedBalance: bigint; availableBalance: bigint }];
+
       setUserCollaterals({
         locked: formatUnits(userCollateral.lockedBalance, 18),
         available: formatUnits(userCollateral.availableBalance, 18),
       });
 
-      console.log(userCollateral);
-
       setVusdtBalance(formatUnits(vusdtBal as bigint, 18));
-
     } catch (error) {
       console.error("Failed to load balances:", error);
     }
   };
 
   const handleAirdrop = async () => {
-    console.log("Airdropping 1000 vUSDT to", address);
-    await writeContract(config, {
-      address: VUSDT_ADDRESS,
-      abi: VUSDT_ABI,
-      functionName: 'airDrop',
-      args: [address],
-      // gas: BigInt(60000), // conservative gas limit
-      // maxFeePerGas: BigInt(30e9), // 30 Gwei
-      // maxPriorityFeePerGas: BigInt(2e9), // 2 Gwei
-    });
-    await loadBalances();
-  };
+    if (!address) return;
 
+    try {
+      toast.info(`Airdropping 1000 vUSDT to ${address}...`);
+      const tx = await writeContract(config, {
+        address: VUSDT_ADDRESS,
+        abi: VUSDT_ABI,
+        functionName: 'airDrop',
+        args: [address],
+      });
+
+      toast.info("Transaction sent. Waiting for confirmation...");
+
+      const receipt = await waitForTransactionReceipt(config, { hash: tx });
+
+      if (receipt.status === "success") {
+        toast.success("Airdrop successful!");
+        await loadBalances();
+      } else {
+        toast.error("Airdrop failed.");
+      }
+    } catch (error) {
+      console.error("Airdrop failed:", error);
+      toast.error("Airdrop failed.");
+    }
+  };
 
   const handleDeposit = async () => {
     if (!depositAmount || isNaN(Number(depositAmount)) || Number(depositAmount) <= 0) {
-      alert("Please enter a valid deposit amount.");
+      toast.error("Please enter a valid deposit amount.");
       return;
     }
 
     try {
       setIsDepositing(true);
-
       const amt = parseUnits(depositAmount, 18);
 
-      console.log("check approval");
       const allowance = await readContract(config, {
         address: VUSDT_ADDRESS,
         abi: VUSDT_ABI,
         functionName: 'allowance',
         args: [address, VAULT_ADDRESS],
-      })as bigint;
+      }) as bigint;
 
       if (allowance < amt) {
-        await writeContract(config, {
+        toast.info("Approving tokens...");
+        const approveTx = await writeContract(config, {
           address: VUSDT_ADDRESS,
           abi: VUSDT_ABI,
           functionName: 'approve',
           args: [VAULT_ADDRESS, amt],
         });
+
+        const approveReceipt = await waitForTransactionReceipt(config, { hash: approveTx });
+        if (approveReceipt.status === "success") {
+          toast.success("Approval successful!");
+        } else {
+          toast.error("Approval failed.");
+          return;
+        }
       }
 
-      console.log("Depositing");
-      await writeContract(config, {
+      toast.info("Depositing collateral...");
+      const depositTx = await writeContract(config, {
         address: VAULT_ADDRESS,
         abi: VAULT_ABI,
         functionName: 'depositCollateral',
         args: [amt],
       });
 
-      console.log("Deposit successful");
-      setDepositAmount('');
-      await loadBalances();
+      toast.info("Transaction sent. Waiting for confirmation...");
+
+      const receipt = await waitForTransactionReceipt(config, { hash: depositTx });
+
+      if (receipt.status === "success") {
+        toast.success("Deposit successful!");
+        setDepositAmount('');
+        await loadBalances();
+      } else {
+        toast.error("Deposit failed.");
+      }
     } catch (error) {
       console.error("Deposit failed:", error);
-      alert("Deposit failed. Check console for details.");
+      toast.error("Deposit failed.");
     } finally {
       setIsDepositing(false);
     }
   };
 
-
   const handleWithdraw = async () => {
     if (!withdrawAmount || isNaN(Number(withdrawAmount)) || Number(withdrawAmount) <= 0) {
-      alert("Please enter a valid withdrawal amount.");
+      toast.error("Please enter a valid withdrawal amount.");
       return;
     }
 
     try {
       setIsWithdrawing(true);
-
       const amt = parseUnits(withdrawAmount, 18);
 
-      console.log("Withdrawing");
-      await writeContract(config, {
+      toast.info("Withdrawing collateral...");
+      const tx = await writeContract(config, {
         address: VAULT_ADDRESS,
         abi: VAULT_ABI,
         functionName: 'withdrawCollateral',
         args: [amt],
       });
 
-      console.log("Withdraw successful");
-      setWithdrawAmount('');
-      await loadBalances();
+      toast.info("Transaction sent. Waiting for confirmation...");
+
+      const receipt = await waitForTransactionReceipt(config, { hash: tx });
+
+      if (receipt.status === "success") {
+        toast.success("Withdrawal successful!");
+        setWithdrawAmount('');
+        await loadBalances();
+      } else {
+        toast.error("Withdrawal failed.");
+      }
     } catch (error) {
       console.error("Withdrawal failed:", error);
-      alert("Withdrawal failed. Check console for details.");
+      toast.error("Withdrawal failed.");
     } finally {
       setIsWithdrawing(false);
     }
   };
-
 
   useEffect(() => {
     if (address) loadBalances();
