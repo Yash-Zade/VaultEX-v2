@@ -134,7 +134,7 @@ export default function TradingPage() {
         functionName: "getCurrentFundingRate",
         account: address
       });
-      setFundingRate(Number(rate) / 100);
+      setFundingRate(Number(rate) / 10000);
     } catch (error) {
       console.error("Error fetching funding rate:", error);
     }
@@ -154,7 +154,7 @@ export default function TradingPage() {
         totalShort: Number(stats[1]) / 1e18,
         totalLongCollateral: Number(stats[2]) / 1e18,
         totalShortCollateral: Number(stats[3]) / 1e18,
-        fundingRateAccumulated: Number(stats[4]) / 1e18
+        fundingRateAccumulated: Number(stats[4]) / 10000,
       });
 
       const totalVolume = stats[0] + stats[1];
@@ -636,7 +636,7 @@ export default function TradingPage() {
                     size="sm"
                   >
                     {positionStats.fundingRateAccumulated >= 0 ? '+' : ''}
-                    {(positionStats.fundingRateAccumulated * 100).toFixed(4)}%
+                    {(positionStats.fundingRateAccumulated).toFixed(4)}%
                   </Chip>
                 </div>
               </div>
