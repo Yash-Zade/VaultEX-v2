@@ -95,7 +95,7 @@ export default function AboutPage() {
             </Link>
             <Link
               className={buttonStyles({ color: "secondary", variant: "flat", radius: "full" })}
-              href="https://github.com/your-repo"
+              href="https://github.com/Yash-Zade/VaultEX-v2"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -104,7 +104,7 @@ export default function AboutPage() {
             </Link>
             <Link
               className={buttonStyles({ color: "success", variant: "bordered", radius: "full" })}
-              href="/community"
+              href="#"
             >
               <Users2 size={18} />
               Join the Community
