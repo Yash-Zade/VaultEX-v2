@@ -278,13 +278,9 @@ export default function TradingPage() {
               <Divider orientation="vertical" className="h-8" />
               <div>
                 <p className="text-sm text-foreground-500">Total Volume</p>
-                <p className="font-bold">${(volume / 1000).toFixed(0)}K</p>
+                <p className="font-bold">${(volume / 1000).toFixed(4)}K</p>
               </div>
-              <Divider orientation="vertical" className="h-8" />
-              <div>
-                <p className="text-sm text-foreground-500">Funding Rate</p>
-                <p className="font-bold">${fundingRate}</p>
-              </div>
+
             </div>
           </CardBody>
         </Card>
