@@ -23,7 +23,7 @@ export default function Docs() {
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <Tabs
             selectedKey={selectedTab}
-            onSelectionChange={setSelectedTab}
+            onSelectionChange={(key) => setSelectedTab(key as string)}
             variant="underlined"
             classNames={{
               tabList: "gap-8",

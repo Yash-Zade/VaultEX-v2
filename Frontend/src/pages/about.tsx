@@ -102,13 +102,6 @@ export default function AboutPage() {
               <GitBranch size={18} />
               Visit GitHub
             </Link>
-            <Link
-              className={buttonStyles({ color: "success", variant: "bordered", radius: "full" })}
-              href="#"
-            >
-              <Users2 size={18} />
-              Join the Community
-            </Link>
           </div>
         </div>
       </section>
