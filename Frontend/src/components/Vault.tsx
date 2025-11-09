@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
@@ -6,11 +6,11 @@ import { Chip } from "@heroui/chip";
 import { Divider } from "@heroui/divider";
 import { Wallet, ArrowUpCircle, ArrowDownCircle, Gift } from "lucide-react";
 import { useAccount } from "wagmi";
-import { readContract, waitForTransactionReceipt, writeContract, } from '@wagmi/core';
+import { readContract, waitForTransactionReceipt, writeContract } from '@wagmi/core';
 import { parseUnits, formatUnits } from "viem";
 import { config } from "@/config/wagmi-config";
-import { toast } from "react-toastify";
-
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 import VUSDT_ABI from "@/abis/vusdt.json";
 import VAULT_ABI from "@/abis/vault.json";
@@ -25,11 +25,14 @@ export default function VaultPage() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [isAirdropping, setIsAirdropping] = useState(false);
   const [activeField, setActiveField] = useState<'deposit' | 'withdraw'>('deposit');
   const [userCollaterals, setUserCollaterals] = useState({
     locked: '',
     available: '',
   });
+
+  const toastIdRef = useRef<any>(null);
 
   const loadBalances = async () => {
     if (!address) return;
@@ -62,10 +65,18 @@ export default function VaultPage() {
   };
 
   const handleAirdrop = async () => {
-    if (!address) return;
+    if (!address || isAirdropping) return;
+
+    setIsAirdropping(true);
+
+    if (toastIdRef.current) {
+      toast.dismiss(toastIdRef.current);
+      toastIdRef.current = null;
+    }
 
     try {
-      toast.info(`Airdropping 1000 vUSDT to ${address}...`);
+      toastIdRef.current = toast.info("Preparing airdrop...", { autoClose: false });
+
       const tx = await writeContract(config, {
         address: VUSDT_ADDRESS,
         abi: VUSDT_ABI,
@@ -73,30 +84,86 @@ export default function VaultPage() {
         args: [address],
       });
 
-      toast.info("Transaction sent. Waiting for confirmation...");
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: "Transaction sent. Waiting for confirmation...",
+          type: "info",
+          autoClose: false
+        });
+      }
 
       const receipt = await waitForTransactionReceipt(config, { hash: tx });
 
       if (receipt.status === "success") {
-        toast.success("Airdrop successful!");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: "✅ Airdrop successful! 10,000 vUSDT received.",
+            type: "success",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await loadBalances();
       } else {
-        toast.error("Airdrop failed.");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: "❌ Airdrop failed. Please try again.",
+            type: "error",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Airdrop failed:", error);
-      toast.error("Airdrop failed.");
+
+      let errorMessage = "Airdrop failed.";
+      
+      if (error?.message) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient funds for gas fees.";
+        } else if (error.message.length < 100) {
+          errorMessage = error.message;
+        }
+      }
+
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: `❌ ${errorMessage}`,
+          type: "error",
+          autoClose: 5000
+        });
+      } else {
+        toast.error(`❌ ${errorMessage}`, { autoClose: 5000 });
+      }
+      toastIdRef.current = null;
+    } finally {
+      setIsAirdropping(false);
     }
   };
 
   const handleDeposit = async () => {
     if (!depositAmount || isNaN(Number(depositAmount)) || Number(depositAmount) <= 0) {
-      toast.error("Please enter a valid deposit amount.");
+      toast.error("❌ Please enter a valid deposit amount.", { autoClose: 3000 });
       return;
     }
 
+    if (!address) {
+      toast.error("❌ Please connect your wallet.", { autoClose: 3000 });
+      return;
+    }
+
+    setIsDepositing(true);
+
+    if (toastIdRef.current) {
+      toast.dismiss(toastIdRef.current);
+      toastIdRef.current = null;
+    }
+
     try {
-      setIsDepositing(true);
       const amt = parseUnits(depositAmount, 18);
 
       const allowance = await readContract(config, {
@@ -107,7 +174,8 @@ export default function VaultPage() {
       }) as bigint;
 
       if (allowance < amt) {
-        toast.info("Approving tokens...");
+        toastIdRef.current = toast.info("Approving tokens...", { autoClose: false });
+
         const approveTx = await writeContract(config, {
           address: VUSDT_ADDRESS,
           abi: VUSDT_ABI,
@@ -115,16 +183,42 @@ export default function VaultPage() {
           args: [VAULT_ADDRESS, amt],
         });
 
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: "Waiting for approval confirmation...",
+            type: "info",
+            autoClose: false
+          });
+        }
+
         const approveReceipt = await waitForTransactionReceipt(config, { hash: approveTx });
+        
         if (approveReceipt.status === "success") {
-          toast.success("Approval successful!");
+          if (toastIdRef.current) {
+            toast.update(toastIdRef.current, {
+              render: "✅ Approval successful!",
+              type: "success",
+              autoClose: 2000
+            });
+          }
+          toastIdRef.current = null;
+          await new Promise(resolve => setTimeout(resolve, 500));
         } else {
-          toast.error("Approval failed.");
+          if (toastIdRef.current) {
+            toast.update(toastIdRef.current, {
+              render: "❌ Approval failed.",
+              type: "error",
+              autoClose: 5000
+            });
+          }
+          toastIdRef.current = null;
+          setIsDepositing(false);
           return;
         }
       }
 
-      toast.info("Depositing collateral...");
+      toastIdRef.current = toast.info("Depositing collateral...", { autoClose: false });
+
       const depositTx = await writeContract(config, {
         address: VAULT_ADDRESS,
         abi: VAULT_ABI,
@@ -132,20 +226,65 @@ export default function VaultPage() {
         args: [amt],
       });
 
-      toast.info("Transaction sent. Waiting for confirmation...");
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: "Transaction sent. Waiting for confirmation...",
+          type: "info",
+          autoClose: false
+        });
+      }
 
       const receipt = await waitForTransactionReceipt(config, { hash: depositTx });
 
       if (receipt.status === "success") {
-        toast.success("Deposit successful!");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: `✅ Deposit successful! ${depositAmount} vUSDT deposited.`,
+            type: "success",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
         setDepositAmount('');
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await loadBalances();
       } else {
-        toast.error("Deposit failed.");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: "❌ Deposit failed. Please try again.",
+            type: "error",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Deposit failed:", error);
-      toast.error("Deposit failed.");
+
+      let errorMessage = "Deposit failed.";
+      
+      if (error?.message) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient funds for gas fees.";
+        } else if (error.message.includes("InsufficientFunds")) {
+          errorMessage = "Insufficient vUSDT balance.";
+        } else if (error.message.length < 100) {
+          errorMessage = error.message;
+        }
+      }
+
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: `❌ ${errorMessage}`,
+          type: "error",
+          autoClose: 5000
+        });
+      } else {
+        toast.error(`❌ ${errorMessage}`, { autoClose: 5000 });
+      }
+      toastIdRef.current = null;
     } finally {
       setIsDepositing(false);
     }
@@ -153,15 +292,27 @@ export default function VaultPage() {
 
   const handleWithdraw = async () => {
     if (!withdrawAmount || isNaN(Number(withdrawAmount)) || Number(withdrawAmount) <= 0) {
-      toast.error("Please enter a valid withdrawal amount.");
+      toast.error("❌ Please enter a valid withdrawal amount.", { autoClose: 3000 });
       return;
     }
 
+    if (!address) {
+      toast.error("❌ Please connect your wallet.", { autoClose: 3000 });
+      return;
+    }
+
+    setIsWithdrawing(true);
+
+    if (toastIdRef.current) {
+      toast.dismiss(toastIdRef.current);
+      toastIdRef.current = null;
+    }
+
     try {
-      setIsWithdrawing(true);
       const amt = parseUnits(withdrawAmount, 18);
 
-      toast.info("Withdrawing collateral...");
+      toastIdRef.current = toast.info("Withdrawing collateral...", { autoClose: false });
+
       const tx = await writeContract(config, {
         address: VAULT_ADDRESS,
         abi: VAULT_ABI,
@@ -169,20 +320,65 @@ export default function VaultPage() {
         args: [amt],
       });
 
-      toast.info("Transaction sent. Waiting for confirmation...");
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: "Transaction sent. Waiting for confirmation...",
+          type: "info",
+          autoClose: false
+        });
+      }
 
       const receipt = await waitForTransactionReceipt(config, { hash: tx });
 
       if (receipt.status === "success") {
-        toast.success("Withdrawal successful!");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: `✅ Withdrawal successful! ${withdrawAmount} vUSDT withdrawn.`,
+            type: "success",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
         setWithdrawAmount('');
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await loadBalances();
       } else {
-        toast.error("Withdrawal failed.");
+        if (toastIdRef.current) {
+          toast.update(toastIdRef.current, {
+            render: "❌ Withdrawal failed. Please try again.",
+            type: "error",
+            autoClose: 5000
+          });
+        }
+        toastIdRef.current = null;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Withdrawal failed:", error);
-      toast.error("Withdrawal failed.");
+
+      let errorMessage = "Withdrawal failed.";
+      
+      if (error?.message) {
+        if (error.message.includes("User rejected")) {
+          errorMessage = "Transaction cancelled by user.";
+        } else if (error.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient funds for gas fees.";
+        } else if (error.message.includes("InsufficientFunds")) {
+          errorMessage = "Insufficient available balance.";
+        } else if (error.message.length < 100) {
+          errorMessage = error.message;
+        }
+      }
+
+      if (toastIdRef.current) {
+        toast.update(toastIdRef.current, {
+          render: `❌ ${errorMessage}`,
+          type: "error",
+          autoClose: 5000
+        });
+      } else {
+        toast.error(`❌ ${errorMessage}`, { autoClose: 5000 });
+      }
+      toastIdRef.current = null;
     } finally {
       setIsWithdrawing(false);
     }
@@ -192,9 +388,37 @@ export default function VaultPage() {
     if (address) loadBalances();
   }, [address]);
 
+  useEffect(() => {
+    return () => {
+      if (toastIdRef.current) {
+        toast.dismiss(toastIdRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen p-6 bg-background">
+      <ToastContainer
+        position="bottom-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop={true}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="colored"
+        style={{
+          zIndex: 9999,
+        }}
+        toastStyle={{
+          borderRadius: "12px",
+          boxShadow: "0 10px 25px rgba(0, 0, 0, 0.15)",
+          fontWeight: "500",
+          fontSize: "14px",
+        }}
+      />
       <div className="max-w-5xl mx-auto space-y-6">
 
         {/* Header */}
@@ -247,8 +471,10 @@ export default function VaultPage() {
                 onPress={handleAirdrop}
                 startContent={<Gift size={18} />}
                 className="w-full"
+                isLoading={isAirdropping}
+                isDisabled={isAirdropping || !address}
               >
-                Airdrop 10,000 vUSDT
+                {isAirdropping ? "Processing..." : "Airdrop 10,000 vUSDT"}
               </Button>
               <Button
                 color="secondary"
@@ -256,8 +482,9 @@ export default function VaultPage() {
                 onPress={loadBalances}
                 startContent={<Wallet size={18} />}
                 className="w-full"
+                isDisabled={!address}
               >
-                Load Balances
+                Refresh Balances
               </Button>
 
             </CardBody>
@@ -285,6 +512,7 @@ export default function VaultPage() {
                     onChange={(e) => setDepositAmount(e.target.value)}
                     onFocus={() => setActiveField('deposit')}
                     size="lg"
+                    disabled={isDepositing}
                   />
                   <Button
                     color="success"
@@ -292,9 +520,10 @@ export default function VaultPage() {
                     onPress={handleDeposit}
                     startContent={<ArrowUpCircle size={18} />}
                     className="w-full"
-                    isDisabled={!depositAmount || parseFloat(depositAmount) <= 0}
+                    isLoading={isDepositing}
+                    isDisabled={!depositAmount || parseFloat(depositAmount) <= 0 || isDepositing || !address}
                   >
-                    {isDepositing ? "Depositing..." : "Deposit"}
+                    {isDepositing ? "Processing..." : "Deposit"}
                   </Button>
                 </div>
 
@@ -312,6 +541,7 @@ export default function VaultPage() {
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     onFocus={() => setActiveField('withdraw')}
                     size="lg"
+                    disabled={isWithdrawing}
                   />
                   <Button
                     color="danger"
@@ -320,9 +550,10 @@ export default function VaultPage() {
                     onPress={handleWithdraw}
                     startContent={<ArrowDownCircle size={18} />}
                     className="w-full"
-                    isDisabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0}
+                    isLoading={isWithdrawing}
+                    isDisabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0 || isWithdrawing || !address}
                   >
-                    {isWithdrawing ? "Withdrawing..." : "Withdraw"}
+                    {isWithdrawing ? "Processing..." : "Withdraw"}
                   </Button>
                 </div>
               </div>
