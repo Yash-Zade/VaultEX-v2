@@ -1,0 +1,32 @@
+{
+  "name": "keeper",
+  "version": "1.0.0",
+  "description": "Automated keeper bot for perpetual contracts",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "ts-node -T src/index.ts"
+  },
+  "keywords": [
+    "keeper",
+    "liquidation",
+    "defi"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "ethers": "^6.15.0",
+    "express": "^5.1.0",
+    "mongodb": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.5.9",
+    "@types/express": "^5.0.5",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2",
+    "nodemon": "^3.0.1"
+  }
+}
