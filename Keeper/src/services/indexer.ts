@@ -20,15 +20,27 @@ export class Indexer {
     // HTTP for reads
     this.http = new ethers.JsonRpcProvider(config.rpc.httpUrl, config.rpc.chainId);
 
+
     // WS for live events
     try {
       if (config.rpc.wsUrl) {
         this.ws = new ethers.WebSocketProvider(config.rpc.wsUrl, config.rpc.chainId);
+
+        (this.ws as any)._websocket.on("close", (code: any) => {
+          console.error(`❌ WebSocket closed (code ${code}). Restarting indexer...`);
+          process.exit(1);
+        });
+
+        (this.ws as any)._websocket.on("error", (err: any) => {
+          console.error("⚠️ WebSocket error:", err);
+          process.exit(1);
+        });
       }
     } catch (e) {
-      console.warn('⚠️ Failed to create WebSocketProvider. Falling back to polling only. Error:', e);
+      console.warn("⚠️ Failed to create WebSocketProvider. Falling back to polling only.\nError:", e);
       this.ws = undefined;
     }
+
 
     this.positionManagerHttp = new ethers.Contract(
       config.contracts.positionManager,
@@ -42,7 +54,12 @@ export class Indexer {
         positionManagerAbi,
         this.ws
       );
+
+      (this.ws as any)._websocket.on("open", () => {
+        console.log("🔗 WebSocket connected & subscriptions active.");
+      });
     }
+
   }
 
   async start() {
@@ -130,10 +147,10 @@ export class Indexer {
     this.isRunning = false;
     try {
       this.positionManagerWs?.removeAllListeners();
-    } catch {}
+    } catch { }
     try {
       this.ws?.destroy();
-    } catch {}
+    } catch { }
     console.log('Indexer stopped');
   }
 }
