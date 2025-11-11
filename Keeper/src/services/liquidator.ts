@@ -15,7 +15,6 @@ export class Liquidator {
         this.provider = new ethers.JsonRpcProvider(config.rpc.httpUrl, config.rpc.chainId);
         this.wallet = new ethers.Wallet(config.wallet.privateKey, this.provider);
 
-
         this.positionManager = new ethers.Contract(
             config.contracts.positionManager,
             positionManagerAbi,
@@ -58,9 +57,9 @@ export class Liquidator {
 
         console.log(`🔍 Checking ${positions.length} positions for liquidation...`);
 
-        // Get current price
-        const [currentPrice] = await this.vamm.getCurrentPrice?.();
-        const price = Number(ethers.formatEther(currentPrice));
+        // Get current price from vAMM
+        const [currentPriceRaw] = await this.vamm.getCurrentPrice?.();
+        const currentPrice = Number(ethers.formatEther(currentPriceRaw));
 
         // Get current funding rate
         let accumulatedFundingRate = 0;
@@ -75,7 +74,7 @@ export class Liquidator {
             try {
                 const isLiquidatable = await this.isPositionLiquidatable(
                     position,
-                    price,
+                    currentPrice,
                     accumulatedFundingRate
                 );
 
@@ -95,28 +94,45 @@ export class Liquidator {
         currentPrice: number,
         accumulatedFundingRate: number
     ): Promise<boolean> {
+        // Parse values from storage
         const collateral = Number(ethers.formatEther(position.collateral));
         const entryPrice = Number(ethers.formatEther(position.entryPrice));
-        const positionSize = collateral * position.leverage;
+        const leverage = position.leverage;
 
-        // Calculate PnL
-        const priceDiff = position.isLong
-            ? currentPrice - entryPrice
-            : entryPrice - currentPrice;
+        // ===== CORRECT PNL CALCULATION (from PDF) =====
+        // priceChangePercentage calculation
+        let priceChangePercentage: number;
+        if (position.isLong) {
+            // For longs: (currentPrice / entryPrice) - 1
+            priceChangePercentage = (currentPrice / entryPrice) - 1;
+        } else {
+            // For shorts: 1 - (currentPrice / entryPrice)
+            priceChangePercentage = 1 - (currentPrice / entryPrice);
+        }
 
-        const pnl = (priceDiff / entryPrice) * positionSize;
+        // PnL = collateral × leverage × priceChangePercentage
+        const pnl = collateral * leverage * priceChangePercentage;
 
-        // Calculate funding payment
-        const fundingPayment =
-            ((accumulatedFundingRate - position.entryFundingRate) / 10000) * positionSize;
+        // ===== CORRECT FUNDING PAYMENT CALCULATION (from PDF) =====
+        const fundingDelta = accumulatedFundingRate - (position.entryFundingRate || 0);
+        // fundingPayment = (collateral × fundingDelta) / 10000
+        let fundingPayment = (collateral * fundingDelta) / 10000;
+        
+        // For longs: negative (they pay)
+        // For shorts: positive (they receive if rate is positive)
+        if (position.isLong) {
+            fundingPayment = -fundingPayment;
+        }
 
-        const adjustedPnl = position.isLong
-            ? pnl - fundingPayment
-            : pnl + fundingPayment;
-
-        // Check if position is underwater (losses exceed 90% of collateral)
-        const liquidationThreshold = collateral * 0.9;
-        const isLiquidatable = adjustedPnl < -liquidationThreshold;
+        // ===== CORRECT LIQUIDATION CHECK (from PDF) =====
+        // remainingValue = collateral + pnl + fundingPayment
+        const remainingValue = collateral + pnl + fundingPayment;
+        
+        // maintenanceMargin = 5% of collateral (LIQUIDATION_THRESHOLD_BPS = 500)
+        const maintenanceMargin = collateral * 0.05;
+        
+        // Position is liquidatable if remainingValue <= maintenanceMargin
+        const isLiquidatable = remainingValue <= maintenanceMargin;
 
         if (isLiquidatable) {
             console.log(`
@@ -124,12 +140,17 @@ export class Liquidator {
   Token ID: ${position.tokenId}
   Owner: ${position.owner}
   Type: ${position.isLong ? 'LONG' : 'SHORT'}
+  Leverage: ${leverage}x
   Entry Price: $${entryPrice.toFixed(2)}
   Current Price: $${currentPrice.toFixed(2)}
+  Price Change: ${(priceChangePercentage * 100).toFixed(2)}%
+  
   Collateral: $${collateral.toFixed(2)}
-  PnL: $${adjustedPnl.toFixed(2)}
-  Threshold: -$${liquidationThreshold.toFixed(2)}
-      `);
+  PnL: $${pnl.toFixed(2)}
+  Funding Payment: $${fundingPayment.toFixed(2)}
+  Remaining Value: $${remainingValue.toFixed(2)}
+  Maintenance Margin: $${maintenanceMargin.toFixed(2)}
+            `);
         }
 
         return isLiquidatable;
