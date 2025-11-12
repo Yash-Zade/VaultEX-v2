@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { config } from '../config/config';
 import { db, Position } from './database';
-import positionManagerAbi from '../abis/PositionManager.json';
+import positionManagerAbi from "../abis/positionManager.json";
 import vammAbi from '../abis/vamm.json';
 
 export class Liquidator {

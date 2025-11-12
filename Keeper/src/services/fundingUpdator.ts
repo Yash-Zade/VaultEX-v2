@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { config } from '../config/config';
 import { db } from './database';
-import positionManagerAbi from '../abis/PositionManager.json';
+import positionManagerAbi from "../abis/positionManager.json";
 
 export class FundingUpdater {
     private provider: ethers.JsonRpcProvider;

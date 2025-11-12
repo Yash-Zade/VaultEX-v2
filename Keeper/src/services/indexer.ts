@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { config } from '../config/config';
 import { db, type Position } from './database';
-import positionManagerAbi from '../abis/PositionManager.json';
+import positionManagerAbi from "../abis/positionManager.json";
 
 /**
  * Live-only Indexer:
