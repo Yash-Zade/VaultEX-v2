@@ -11,4 +11,4 @@ export declare class Liquidator {
     private liquidatePosition;
     stop(): void;
 }
-//# sourceMappingURL=Liquidator.d.ts.map
+//# sourceMappingURL=liquidator.d.ts.map

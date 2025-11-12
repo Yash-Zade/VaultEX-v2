@@ -1,6 +1,7 @@
 export declare const config: {
     rpc: {
-        url: string;
+        httpUrl: string;
+        wsUrl: string;
         chainId: number;
     };
     contracts: {
@@ -15,7 +16,6 @@ export declare const config: {
         uri: string;
     };
     bot: {
-        indexerStartBlock: string;
         liquidationCheckInterval: number;
         fundingUpdateInterval: number;
         maxGasPrice: string;

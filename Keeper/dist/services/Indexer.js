@@ -11,123 +11,101 @@ const PositionManager_json_1 = __importDefault(require("../abis/PositionManager.
 class Indexer {
     constructor() {
         this.isRunning = false;
-        this.provider = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.url);
-        this.positionManager = new ethers_1.ethers.Contract(config_1.config.contracts.positionManager, PositionManager_json_1.default, this.provider);
+        this.http = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.httpUrl, config_1.config.rpc.chainId);
+        try {
+            if (config_1.config.rpc.wsUrl) {
+                this.ws = new ethers_1.ethers.WebSocketProvider(config_1.config.rpc.wsUrl, config_1.config.rpc.chainId);
+                this.ws._websocket.on("close", (code) => {
+                    console.error(`❌ WebSocket closed (code ${code}). Restarting indexer...`);
+                    process.exit(1);
+                });
+                this.ws._websocket.on("error", (err) => {
+                    console.error("⚠️ WebSocket error:", err);
+                    process.exit(1);
+                });
+            }
+        }
+        catch (e) {
+            console.warn("⚠️ Failed to create WebSocketProvider. Falling back to polling only.\nError:", e);
+            this.ws = undefined;
+        }
+        this.positionManagerHttp = new ethers_1.ethers.Contract(config_1.config.contracts.positionManager, PositionManager_json_1.default, this.http);
+        if (this.ws) {
+            this.positionManagerWs = new ethers_1.ethers.Contract(config_1.config.contracts.positionManager, PositionManager_json_1.default, this.ws);
+            this.ws._websocket.on("open", () => {
+                console.log("🔗 WebSocket connected & subscriptions active.");
+            });
+        }
     }
     async start() {
-        console.log('🚀 Starting Indexer...');
+        console.log('🚀 Starting Live Indexer (No Backfill)...');
         this.isRunning = true;
-        try {
-            let lastBlock = await database_1.db.getLastProcessedBlock();
-            if (lastBlock === 0 || config_1.config.bot.indexerStartBlock === 'latest') {
-                lastBlock = await this.provider.getBlockNumber();
-                console.log(`Starting from current block: ${lastBlock}`);
-            }
-            await this.indexHistoricalEvents(lastBlock);
-            await this.subscribeToNewEvents();
+        const current = await this.http.getBlockNumber();
+        const startFrom = current + 1;
+        console.log(`📌 Starting indexing from block ${startFrom}`);
+        if (!this.positionManagerWs) {
+            console.warn('⚠️ No WS provider available — event listeners disabled. (Provide RPC_WS_URL).');
+            return;
         }
-        catch (error) {
-            console.error('❌ Indexer error:', error);
-            this.isRunning = false;
-        }
-    }
-    async indexHistoricalEvents(fromBlock) {
-        console.log(`📚 Indexing events from block ${fromBlock}...`);
-        const currentBlock = await this.provider.getBlockNumber();
-        const BATCH_SIZE = 1000;
-        for (let start = fromBlock; start <= currentBlock; start += BATCH_SIZE) {
-            const end = Math.min(start + BATCH_SIZE - 1, currentBlock);
+        console.log('👂 Listening for new live events...');
+        this.positionManagerWs.on('PositionOpened', async (user, collateraal, entryPrice, leverage, entryFundingRate, isLong, ev) => {
             try {
-                await this.processBlockRange(start, end);
-                await database_1.db.updateLastProcessedBlock(end);
-                console.log(`✅ Processed blocks ${start} to ${end}`);
+                const block = await this.http.getBlock(ev.blockNumber);
+                const tokenIdMaybe = undefined;
+                const position = {
+                    tokenId: tokenIdMaybe ?? `${user}-${ev.blockNumber}-${ev.logIndex}`,
+                    owner: user,
+                    collateral: collateraal.toString(),
+                    leverage: Number(leverage),
+                    entryPrice: entryPrice.toString(),
+                    entryFundingRate: Number(entryFundingRate),
+                    isLong: Boolean(isLong),
+                    size: (BigInt(collateraal.toString()) * BigInt(leverage)).toString(),
+                    isActive: true,
+                    blockNumber: ev.blockNumber,
+                    timestamp: block?.timestamp ?? Math.floor(Date.now() / 1000),
+                };
+                await database_1.db.upsertPosition(position);
+                console.log(`📝 Indexed new position (opened) for ${user} at block ${ev.blockNumber}`);
             }
-            catch (error) {
-                console.error(`❌ Error processing blocks ${start}-${end}:`, error);
-                await new Promise(resolve => setTimeout(resolve, 5000));
+            catch (err) {
+                console.error('❌ handlePositionOpened error:', err);
             }
-        }
-    }
-    async processBlockRange(fromBlock, toBlock) {
-        const openFilter = this.positionManager.filters.PositionOpened();
-        const openEvents = await this.positionManager.queryFilter(openFilter, fromBlock, toBlock);
-        for (const event of openEvents) {
-            await this.handlePositionOpened(event);
-        }
-        const closeFilter = this.positionManager.filters.PositionClosed();
-        const closeEvents = await this.positionManager.queryFilter(closeFilter, fromBlock, toBlock);
-        for (const event of closeEvents) {
-            await this.handlePositionClosed(event);
-        }
-        const liqFilter = this.positionManager.filters.PositionLiquidated();
-        const liqEvents = await this.positionManager.queryFilter(liqFilter, fromBlock, toBlock);
-        for (const event of liqEvents) {
-            await this.handlePositionLiquidated(event);
-        }
-    }
-    async handlePositionOpened(event) {
-        const block = await event.getBlock();
-        const args = event.args;
-        const position = {
-            tokenId: args.tokenId.toString(),
-            owner: args.user,
-            collateral: args.collateral.toString(),
-            leverage: Number(args.leverage),
-            entryPrice: '0',
-            entryFundingRate: 0,
-            isLong: args.isLong,
-            size: (BigInt(args.collateral.toString()) * BigInt(args.leverage)).toString(),
-            isActive: true,
-            blockNumber: event.blockNumber,
-            timestamp: block.timestamp,
-        };
-        try {
-            const posData = await this.positionManager._getPositionData?.(args.tokenId);
-            position.entryPrice = posData[2].toString();
-            position.entryFundingRate = Number(posData[3]);
-        }
-        catch (error) {
-            console.error(`Failed to fetch data for position ${args.tokenId}:`, error);
-        }
-        await database_1.db.upsertPosition(position);
-        console.log(`📝 Indexed new position: ${position.tokenId}`);
-    }
-    async handlePositionClosed(event) {
-        const args = event.args;
-        await database_1.db.markPositionInactive(args.tokenId.toString());
-        console.log(`🔒 Position closed: ${args.tokenId.toString()}`);
-    }
-    async handlePositionLiquidated(event) {
-        const args = event.args;
-        await database_1.db.markPositionInactive(args.tokenId.toString());
-        console.log(`⚡ Position liquidated: ${args.tokenId.toString()}`);
-    }
-    async subscribeToNewEvents() {
-        console.log('👂 Listening for new events...');
-        this.positionManager.on('PositionOpened', async (user, tokenId, collateral, leverage, isLong, event) => {
-            console.log(`🆕 New position opened: ${tokenId}`);
-            await this.handlePositionOpened(event);
-            await database_1.db.updateLastProcessedBlock(event.blockNumber);
         });
-        this.positionManager.on('PositionClosed', async (tokenId, pnl, event) => {
-            console.log(`🔒 Position closed: ${tokenId}`);
-            await this.handlePositionClosed(event);
-            await database_1.db.updateLastProcessedBlock(event.blockNumber);
+        this.positionManagerWs.on('PositionClosed', async (tokenId, user, pnl, fundingPayment, fees, ev) => {
+            try {
+                await database_1.db.markPositionInactive(tokenId.toString());
+                console.log(`🔒 Position closed: ${tokenId.toString()} (user ${user}) at block ${ev.blockNumber}`);
+            }
+            catch (err) {
+                console.error('❌ handlePositionClosed error:', err);
+            }
         });
-        this.positionManager.on('PositionLiquidated', async (tokenId, liquidator, event) => {
-            console.log(`⚡ Position liquidated: ${tokenId}`);
-            await this.handlePositionLiquidated(event);
-            await database_1.db.updateLastProcessedBlock(event.blockNumber);
+        this.positionManagerWs.on('PositionLiquidated', async (tokenId, user, ev) => {
+            try {
+                await database_1.db.markPositionInactive(tokenId.toString());
+                console.log(`⚡ Position liquidated: ${tokenId.toString()} (user ${user}) at block ${ev.blockNumber}`);
+            }
+            catch (err) {
+                console.error('❌ handlePositionLiquidated error:', err);
+            }
         });
         while (this.isRunning) {
-            await new Promise(resolve => setTimeout(resolve, 10000));
+            await new Promise((r) => setTimeout(r, 10000));
         }
     }
     stop() {
         this.isRunning = false;
-        this.positionManager.removeAllListeners();
+        try {
+            this.positionManagerWs?.removeAllListeners();
+        }
+        catch { }
+        try {
+            this.ws?.destroy();
+        }
+        catch { }
         console.log('Indexer stopped');
     }
 }
 exports.Indexer = Indexer;
-//# sourceMappingURL=Indexer.js.map
+//# sourceMappingURL=indexer.js.map

@@ -12,7 +12,7 @@ const vamm_json_1 = __importDefault(require("../abis/vamm.json"));
 class Liquidator {
     constructor() {
         this.isRunning = false;
-        this.provider = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.url);
+        this.provider = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.httpUrl, config_1.config.rpc.chainId);
         this.wallet = new ethers_1.ethers.Wallet(config_1.config.wallet.privateKey, this.provider);
         this.positionManager = new ethers_1.ethers.Contract(config_1.config.contracts.positionManager, PositionManager_json_1.default, this.wallet);
         this.vamm = new ethers_1.ethers.Contract(config_1.config.contracts.vamm, vamm_json_1.default, this.provider);
@@ -38,8 +38,8 @@ class Liquidator {
             return;
         }
         console.log(`🔍 Checking ${positions.length} positions for liquidation...`);
-        const [currentPrice] = await this.vamm.getCurrentPrice?.();
-        const price = Number(ethers_1.ethers.formatEther(currentPrice));
+        const [currentPriceRaw] = await this.vamm.getCurrentPrice?.();
+        const currentPrice = Number(ethers_1.ethers.formatEther(currentPriceRaw));
         let accumulatedFundingRate = 0;
         try {
             const fundingRate = await this.positionManager.fundingRateAccumulated?.();
@@ -50,7 +50,7 @@ class Liquidator {
         }
         for (const position of positions) {
             try {
-                const isLiquidatable = await this.isPositionLiquidatable(position, price, accumulatedFundingRate);
+                const isLiquidatable = await this.isPositionLiquidatable(position, currentPrice, accumulatedFundingRate);
                 if (isLiquidatable) {
                     await this.liquidatePosition(position);
                 }
@@ -64,29 +64,40 @@ class Liquidator {
     async isPositionLiquidatable(position, currentPrice, accumulatedFundingRate) {
         const collateral = Number(ethers_1.ethers.formatEther(position.collateral));
         const entryPrice = Number(ethers_1.ethers.formatEther(position.entryPrice));
-        const positionSize = collateral * position.leverage;
-        const priceDiff = position.isLong
-            ? currentPrice - entryPrice
-            : entryPrice - currentPrice;
-        const pnl = (priceDiff / entryPrice) * positionSize;
-        const fundingPayment = ((accumulatedFundingRate - position.entryFundingRate) / 10000) * positionSize;
-        const adjustedPnl = position.isLong
-            ? pnl - fundingPayment
-            : pnl + fundingPayment;
-        const liquidationThreshold = collateral * 0.9;
-        const isLiquidatable = adjustedPnl < -liquidationThreshold;
+        const leverage = position.leverage;
+        let priceChangePercentage;
+        if (position.isLong) {
+            priceChangePercentage = (currentPrice / entryPrice) - 1;
+        }
+        else {
+            priceChangePercentage = 1 - (currentPrice / entryPrice);
+        }
+        const pnl = collateral * leverage * priceChangePercentage;
+        const fundingDelta = accumulatedFundingRate - (position.entryFundingRate || 0);
+        let fundingPayment = (collateral * fundingDelta) / 10000;
+        if (position.isLong) {
+            fundingPayment = -fundingPayment;
+        }
+        const remainingValue = collateral + pnl + fundingPayment;
+        const maintenanceMargin = collateral * 0.05;
+        const isLiquidatable = remainingValue <= maintenanceMargin;
         if (isLiquidatable) {
             console.log(`
 🚨 Liquidatable Position Found!
   Token ID: ${position.tokenId}
   Owner: ${position.owner}
   Type: ${position.isLong ? 'LONG' : 'SHORT'}
+  Leverage: ${leverage}x
   Entry Price: $${entryPrice.toFixed(2)}
   Current Price: $${currentPrice.toFixed(2)}
+  Price Change: ${(priceChangePercentage * 100).toFixed(2)}%
+  
   Collateral: $${collateral.toFixed(2)}
-  PnL: $${adjustedPnl.toFixed(2)}
-  Threshold: -$${liquidationThreshold.toFixed(2)}
-      `);
+  PnL: $${pnl.toFixed(2)}
+  Funding Payment: $${fundingPayment.toFixed(2)}
+  Remaining Value: $${remainingValue.toFixed(2)}
+  Maintenance Margin: $${maintenanceMargin.toFixed(2)}
+            `);
         }
         return isLiquidatable;
     }
@@ -136,4 +147,4 @@ class Liquidator {
     }
 }
 exports.Liquidator = Liquidator;
-//# sourceMappingURL=Liquidator.js.map
+//# sourceMappingURL=liquidator.js.map

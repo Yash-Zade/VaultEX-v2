@@ -12,7 +12,7 @@ class FundingUpdater {
     constructor() {
         this.isRunning = false;
         this.lastUpdateTime = 0;
-        this.provider = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.url);
+        this.provider = new ethers_1.ethers.JsonRpcProvider(config_1.config.rpc.httpUrl, config_1.config.rpc.chainId);
         this.wallet = new ethers_1.ethers.Wallet(config_1.config.wallet.privateKey, this.provider);
         this.positionManager = new ethers_1.ethers.Contract(config_1.config.contracts.positionManager, PositionManager_json_1.default, this.wallet);
         console.log(`💰 Funding Updater wallet: ${this.wallet.address}`);

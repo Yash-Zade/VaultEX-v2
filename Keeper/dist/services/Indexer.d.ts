@@ -1,15 +1,11 @@
 export declare class Indexer {
-    private provider;
-    private positionManager;
+    private http;
+    private ws?;
+    private positionManagerHttp;
+    private positionManagerWs?;
     private isRunning;
     constructor();
     start(): Promise<void>;
-    private indexHistoricalEvents;
-    private processBlockRange;
-    private handlePositionOpened;
-    private handlePositionClosed;
-    private handlePositionLiquidated;
-    private subscribeToNewEvents;
     stop(): void;
 }
-//# sourceMappingURL=Indexer.d.ts.map
+//# sourceMappingURL=indexer.d.ts.map
