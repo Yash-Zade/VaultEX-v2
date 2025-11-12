@@ -5,9 +5,9 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "build": "npx tsc",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "heroku-postbuild": "npx tsc",
+    "heroku-postbuild": "npm run build",
     "dev": "ts-node -T src/index.ts"
   },
   "keywords": [
