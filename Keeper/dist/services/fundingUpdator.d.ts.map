@@ -1,0 +1,1 @@
+{"version":3,"file":"fundingUpdator.d.ts","sourceRoot":"","sources":["../../src/services/fundingUpdator.ts"],"names":[],"mappings":"AAKA,qBAAa,cAAc;IACzB,OAAO,CAAC,QAAQ,CAAyB;IACzC,OAAO,CAAC,MAAM,CAAgB;IAC9B,OAAO,CAAC,eAAe,CAAkB;IACzC,OAAO,CAAC,SAAS,CAAkB;IACnC,OAAO,CAAC,cAAc,CAAa;;IAe7B,KAAK;YAqBG,iBAAiB;IA4E/B,IAAI;CAIL"}
