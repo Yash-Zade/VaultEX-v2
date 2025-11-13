@@ -20,27 +20,15 @@ export class Indexer {
     // HTTP for reads
     this.http = new ethers.JsonRpcProvider(config.rpc.httpUrl, config.rpc.chainId);
 
-
     // WS for live events
     try {
       if (config.rpc.wsUrl) {
         this.ws = new ethers.WebSocketProvider(config.rpc.wsUrl, config.rpc.chainId);
-
-        (this.ws as any)._websocket.on("close", (code: any) => {
-          console.error(`❌ WebSocket closed (code ${code}). Restarting indexer...`);
-          process.exit(1);
-        });
-
-        (this.ws as any)._websocket.on("error", (err: any) => {
-          console.error("⚠️ WebSocket error:", err);
-          process.exit(1);
-        });
       }
     } catch (e) {
-      console.warn("⚠️ Failed to create WebSocketProvider. Falling back to polling only.\nError:", e);
+      console.warn('⚠️ Failed to create WebSocketProvider. Falling back to polling only. Error:', e);
       this.ws = undefined;
     }
-
 
     this.positionManagerHttp = new ethers.Contract(
       config.contracts.positionManager,
@@ -54,12 +42,7 @@ export class Indexer {
         positionManagerAbi,
         this.ws
       );
-
-      (this.ws as any)._websocket.on("open", () => {
-        console.log("🔗 WebSocket connected & subscriptions active.");
-      });
     }
-
   }
 
   async start() {
@@ -79,32 +62,29 @@ export class Indexer {
 
     console.log('👂 Listening for new live events...');
 
-    // --- Event: PositionOpened(address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int256 entryFundingRate, bool isLong)
+    // --- Event: PositionOpened(uint256 indexed tokenId, address indexed user, uint256 collateral, uint8 leverage, uint256 entryPrice, bool isLong)
     this.positionManagerWs.on(
       'PositionOpened',
-      async (user, collateraal, entryPrice, leverage, entryFundingRate, isLong, ev) => {
+      async (tokenId, user, collateral, leverage, entryPrice, isLong, ev) => {
         try {
           const block = await this.http.getBlock(ev.blockNumber);
-          // NOTE: No tokenId in this event signature; store without tokenId or try to infer externally.
-          // We’ll use a synthetic key `${user}-${ev.blockNumber}-${ev.logIndex}` if tokenId unavailable.
-          const tokenIdMaybe = undefined;
 
           const position: Position = {
-            tokenId: tokenIdMaybe ?? `${user}-${ev.blockNumber}-${ev.logIndex}`,
+            tokenId: tokenId.toString(), // tokenId is emitted by your contract
             owner: user,
-            collateral: collateraal.toString(),
+            collateral: collateral.toString(),
             leverage: Number(leverage),
             entryPrice: entryPrice.toString(),
-            entryFundingRate: Number(entryFundingRate),
+            entryFundingRate: 0, // not provided in the event; default to 0
             isLong: Boolean(isLong),
-            size: (BigInt(collateraal.toString()) * BigInt(leverage)).toString(),
+            size: (BigInt(collateral.toString()) * BigInt(Number(leverage))).toString(),
             isActive: true,
             blockNumber: ev.blockNumber,
             timestamp: block?.timestamp ?? Math.floor(Date.now() / 1000),
           };
 
           await db.upsertPosition(position);
-          console.log(`📝 Indexed new position (opened) for ${user} at block ${ev.blockNumber}`);
+          console.log(`📝 Indexed new position (opened) token=${tokenId.toString()} owner=${user} at block ${ev.blockNumber}`);
         } catch (err) {
           console.error('❌ handlePositionOpened error:', err);
         }
@@ -124,13 +104,13 @@ export class Indexer {
       }
     );
 
-    // --- Event: PositionLiquidated(uint256 indexed tokenId, address indexed user)
+    // --- Event: PositionLiquidated(uint256 indexed tokenId, address indexed user, address indexed liquidator)
     this.positionManagerWs.on(
       'PositionLiquidated',
-      async (tokenId, user, ev) => {
+      async (tokenId, user, liquidator, ev) => {
         try {
           await db.markPositionInactive(tokenId.toString());
-          console.log(`⚡ Position liquidated: ${tokenId.toString()} (user ${user}) at block ${ev.blockNumber}`);
+          console.log(`⚡ Position liquidated: ${tokenId.toString()} (user ${user}) liquidator=${liquidator} at block ${ev.blockNumber}`);
         } catch (err) {
           console.error('❌ handlePositionLiquidated error:', err);
         }
@@ -147,10 +127,10 @@ export class Indexer {
     this.isRunning = false;
     try {
       this.positionManagerWs?.removeAllListeners();
-    } catch { }
+    } catch {}
     try {
       this.ws?.destroy();
-    } catch { }
+    } catch {}
     console.log('Indexer stopped');
   }
 }
