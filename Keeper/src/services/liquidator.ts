@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { config } from '../config/config';
 import { db, Position } from './database';
 import positionManagerAbi from "../abis/positionManager.json";
-import vammAbi from '../abis/vamm.json';
+import vammAbi from "../abis/vamm.json";
 
 export class Liquidator {
     private provider: ethers.JsonRpcProvider;
@@ -61,11 +61,10 @@ export class Liquidator {
         const [currentPriceRaw] = await this.vamm.getCurrentPrice?.();
         const currentPrice = Number(ethers.formatEther(currentPriceRaw));
 
-        // Get current funding rate
-        let accumulatedFundingRate = 0;
+        // Get accumulated funding rate
+        let accumulatedFunding = 0;
         try {
-            const fundingRate = await this.positionManager.fundingRateAccumulated?.();
-            accumulatedFundingRate = Number(fundingRate);
+            accumulatedFunding = Number(await this.positionManager.fundingRateAccumulated?.());
         } catch (error) {
             console.error('Failed to fetch funding rate:', error);
         }
@@ -75,7 +74,7 @@ export class Liquidator {
                 const isLiquidatable = await this.isPositionLiquidatable(
                     position,
                     currentPrice,
-                    accumulatedFundingRate
+                    accumulatedFunding
                 );
 
                 if (isLiquidatable) {
@@ -92,68 +91,57 @@ export class Liquidator {
     private async isPositionLiquidatable(
         position: Position,
         currentPrice: number,
-        accumulatedFundingRate: number
+        accumulatedFunding: number
     ): Promise<boolean> {
-        // Parse values from storage
         const collateral = Number(ethers.formatEther(position.collateral));
         const entryPrice = Number(ethers.formatEther(position.entryPrice));
         const leverage = position.leverage;
+        const priceFactor = currentPrice / entryPrice;
+        const priceChange = position.isLong
+            ? priceFactor - 1 // LONG PNL%
+            : 1 - priceFactor; // SHORT PNL%
 
-        // ===== CORRECT PNL CALCULATION (from PDF) =====
-        // priceChangePercentage calculation
-        let priceChangePercentage: number;
-        if (position.isLong) {
-            // For longs: (currentPrice / entryPrice) - 1
-            priceChangePercentage = (currentPrice / entryPrice) - 1;
-        } else {
-            // For shorts: 1 - (currentPrice / entryPrice)
-            priceChangePercentage = 1 - (currentPrice / entryPrice);
-        }
+        // PnL = collateral * leverage * priceChange%
+        const pnl = collateral * leverage * priceChange;
 
-        // PnL = collateral × leverage × priceChangePercentage
-        const pnl = collateral * leverage * priceChangePercentage;
+        const fundingDelta = accumulatedFunding - (position.entryFundingRate ?? 0);
 
-        // ===== CORRECT FUNDING PAYMENT CALCULATION (from PDF) =====
-        const fundingDelta = accumulatedFundingRate - (position.entryFundingRate || 0);
-        // fundingPayment = (collateral × fundingDelta) / 10000
+        // fundingPayment = collateral * fundingDelta / 10_000
         let fundingPayment = (collateral * fundingDelta) / 10000;
-        
-        // For longs: negative (they pay)
-        // For shorts: positive (they receive if rate is positive)
+
+        // LONG pays if funding positive
         if (position.isLong) {
             fundingPayment = -fundingPayment;
         }
-
-        // ===== CORRECT LIQUIDATION CHECK (from PDF) =====
-        // remainingValue = collateral + pnl + fundingPayment
         const remainingValue = collateral + pnl + fundingPayment;
-        
-        // maintenanceMargin = 5% of collateral (LIQUIDATION_THRESHOLD_BPS = 500)
-        const maintenanceMargin = collateral * 0.05;
-        
-        // Position is liquidatable if remainingValue <= maintenanceMargin
-        const isLiquidatable = remainingValue <= maintenanceMargin;
 
-        if (isLiquidatable) {
+        // MAINTENANCE MARGIN = 5% of collateral
+        const maintenanceMargin = collateral * 0.05;
+
+        const liquidatable = remainingValue <= maintenanceMargin;
+
+        if (liquidatable) {
             console.log(`
-🚨 Liquidatable Position Found!
-  Token ID: ${position.tokenId}
-  Owner: ${position.owner}
-  Type: ${position.isLong ? 'LONG' : 'SHORT'}
-  Leverage: ${leverage}x
-  Entry Price: $${entryPrice.toFixed(2)}
-  Current Price: $${currentPrice.toFixed(2)}
-  Price Change: ${(priceChangePercentage * 100).toFixed(2)}%
-  
-  Collateral: $${collateral.toFixed(2)}
-  PnL: $${pnl.toFixed(2)}
-  Funding Payment: $${fundingPayment.toFixed(2)}
-  Remaining Value: $${remainingValue.toFixed(2)}
-  Maintenance Margin: $${maintenanceMargin.toFixed(2)}
+                🚨 LIQUIDATABLE POSITION
+                TOKEN: ${position.tokenId}
+                OWNER: ${position.owner}
+                TYPE: ${position.isLong ? "LONG" : "SHORT"}
+                LEV: ${leverage}x
+
+                Entry Price: $${entryPrice}
+                Current Price: $${currentPrice}
+                Price Change: ${(priceChange * 100).toFixed(2)}%
+
+                Collateral: ${collateral}
+                PnL: ${pnl}
+                Funding: ${fundingPayment}
+
+                Remaining Value: ${remainingValue}
+                Maintenance Margin: ${maintenanceMargin}
             `);
         }
 
-        return isLiquidatable;
+        return liquidatable;
     }
 
     private async liquidatePosition(position: Position) {
@@ -165,18 +153,17 @@ export class Liquidator {
             const gasPrice = feeData.gasPrice || ethers.parseUnits(config.bot.maxGasPrice, 'gwei');
 
             if (gasPrice > ethers.parseUnits(config.bot.maxGasPrice, 'gwei')) {
-                console.log(`⛽ Gas price too high: ${ethers.formatUnits(gasPrice, 'gwei')} gwei`);
+                console.log(`⛽ Gas too high: ${ethers.formatUnits(gasPrice, 'gwei')} gwei`);
                 return;
             }
 
             // Estimate gas
             const gasEstimate = await this.positionManager.liquidatePosition?.estimateGas?.(position.tokenId);
 
-            // Send liquidation transaction
             const tx = await this.positionManager.liquidatePosition?.(
                 position.tokenId,
                 {
-                    gasLimit: gasEstimate ? gasEstimate * 120n / 100n : undefined, // 20% buffer
+                    gasLimit: gasEstimate ? gasEstimate * 120n / 100n : undefined,
                     gasPrice: gasPrice,
                 }
             );
@@ -186,7 +173,7 @@ export class Liquidator {
             const receipt = await tx.wait();
 
             if (receipt.status === 1) {
-                console.log(`✅ Successfully liquidated position ${position.tokenId}`);
+                console.log(`✅ Successfully liquidated ${position.tokenId}`);
 
                 await db.recordLiquidation({
                     tokenId: position.tokenId,
@@ -200,7 +187,7 @@ export class Liquidator {
                 throw new Error('Transaction failed');
             }
         } catch (error: any) {
-            console.error(`❌ Failed to liquidate position ${position.tokenId}:`, error.message);
+            console.error(`❌ Failed to liquidate ${position.tokenId}:`, error.message);
 
             await db.recordLiquidation({
                 tokenId: position.tokenId,

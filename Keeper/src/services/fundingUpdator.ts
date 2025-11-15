@@ -14,7 +14,6 @@ export class FundingUpdater {
         this.provider = new ethers.JsonRpcProvider(config.rpc.httpUrl, config.rpc.chainId);
         this.wallet = new ethers.Wallet(config.wallet.privateKey, this.provider);
 
-
         this.positionManager = new ethers.Contract(
             config.contracts.positionManager,
             positionManagerAbi,
@@ -22,6 +21,35 @@ export class FundingUpdater {
         );
 
         console.log(`💰 Funding Updater wallet: ${this.wallet.address}`);
+
+        // ======================================================
+        //        EVENT LISTENER: FundingRateUpdated
+        // ======================================================
+        this.positionManager.on("FundingRateUpdated", async (...args) => {
+            const event = args[args.length - 1];
+            const { fundingRateBps, accumulated } = event.args;
+
+            try {
+                const block = await event.getBlock();
+
+                await db.recordFundingUpdate({
+                    blockNumber: block.number,
+                    timestamp: block.timestamp,
+                    fundingRate: Number(fundingRateBps),
+                    accumulated: Number(accumulated),
+                    txHash: event.log.transactionHash
+                });
+
+                console.log(
+                    `📡 FundingRateUpdated → rateBps=${fundingRateBps}, acc=${accumulated}`
+                );
+            } catch (err) {
+                console.error("❌ Failed to store FundingRateUpdated:", err);
+            }
+        });
+        // ======================================================
+        //                     END LISTENER
+        // ======================================================
     }
 
     async start() {

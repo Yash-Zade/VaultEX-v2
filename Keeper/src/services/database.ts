@@ -1,5 +1,6 @@
 import { MongoClient, Db, Collection } from 'mongodb';
 import { config } from '../config/config';
+
 export interface Position {
   tokenId: string;
   owner: string;
@@ -13,6 +14,9 @@ export interface Position {
   blockNumber: number;
   timestamp: number;
   lastChecked?: number;
+  pnl?: number;
+  fundingPayment?: number;
+  fees?: number;
 }
 
 export interface IndexerState {
@@ -25,6 +29,7 @@ export interface FundingUpdate {
   timestamp: number;
   fundingRate: number;
   txHash: string;
+  accumulated?: number;
 }
 
 export interface LiquidationAttempt {
@@ -33,6 +38,7 @@ export interface LiquidationAttempt {
   success: boolean;
   txHash?: string;
   error?: string;
+  user?: string;
 }
 
 class Database {
@@ -98,6 +104,25 @@ class Database {
       { tokenId: position.tokenId },
       { $set: position },
       { upsert: true }
+    );
+  }
+
+  async updateClosedPosition(
+    tokenId: string,
+    pnl: number,
+    fundingPayment: number,
+    fees: number
+  ) {
+    await this.positions.updateOne(
+      { tokenId },
+      { 
+        $set: {
+          isActive: false,
+          pnl,
+          fundingPayment,
+          fees
+        }
+      }
     );
   }
 
