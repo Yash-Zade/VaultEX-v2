@@ -29,6 +29,8 @@ contract Vault is Ownable {
     event CollateralLocked(address indexed user, uint amount);
     event CollateralUnlocked(address indexed user, uint amount);
     event CollateralTransferred(address indexed from, address indexed to, uint amount);
+    event ProfitPaid(address indexed user, uint256 amount);
+    event LossAbsorbed(address indexed user, uint256 amount);
 
     // Only position manager can call certain functions
     modifier onlyPositionManager() {
@@ -108,26 +110,37 @@ contract Vault is Ownable {
         emit CollateralUnlocked(_user, _amount);
     }
 
-    //Pays profit to the user
-    function payOutProfit(address _user, uint _amount) external onlyPositionManager {
-        require(_user != address(0), "Invalid User");
-        require(_amount != 0, "Invalid amount to pay out profit");
-        require(_amount <= totalDeposits, "Insufficient fund to pay out");
-        totalDeposits -= _amount;
+ function payOutProfit(address _user, uint256 _amount) external onlyPositionManager {
+        require(_user != address(0), "Invalid user");
+        require(_amount > 0, "Invalid amount");
+
+        // ensure we have tokens in the contract to back the ledger increase
+        uint256 backingNeeded = totalDeposits + _amount;
+        require(vUSDT.balanceOf(address(this)) >= backingNeeded, "Not enough token backing for profit");
+
+        // credit user and global ledger
         userData[_user].availableBalance += _amount;
-        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
-    }
-
-    //Absorb loss from the user
-    function absorbLoss(address _user, uint _amount) external onlyPositionManager {
-        require(_user != address(0), "Invalid User");
-        require(_amount != 0, "Invalid amount to absorb out profit");
-        require(userData[_user].availableBalance >= _amount, "Infufficient funds");
         totalDeposits += _amount;
-        userData[_user].availableBalance -= _amount;
+
         utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
+
+        emit ProfitPaid(_user, _amount);
     }
 
+    /// This reduces the user's available balance and reduces totalDeposits.
+    function absorbLoss(address _user, uint256 _amount) external onlyPositionManager {
+        require(_user != address(0), "Invalid user");
+        require(_amount > 0, "Invalid amount");
+        require(userData[_user].availableBalance >= _amount, "Insufficient user available balance");
+
+        userData[_user].availableBalance -= _amount;
+        // reflect the removal in global deposits
+        totalDeposits -= _amount;
+
+        utilizationRate = totalDeposits == 0? 0: (totalLocked * 10000) / totalDeposits;
+
+        emit LossAbsorbed(_user, _amount);
+    }
     // Get caller's balances
     function getUserCollateral() external view returns(UserData memory) {
         return userData[msg.sender];

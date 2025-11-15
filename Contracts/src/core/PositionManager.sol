@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -8,7 +8,7 @@ import "../interfaces/IPositionNFT.sol";
 import "../interfaces/IVirtualAMM.sol";
 import "../interfaces/IVault.sol";
 
-contract PositionManager is ReentrancyGuard, Ownable{
+contract PositionManager is ReentrancyGuard, Ownable {
 
     uint constant MAX_LEVERAGE = 50;
     uint256 constant TRADING_FEES = 50;
@@ -44,26 +44,15 @@ contract PositionManager is ReentrancyGuard, Ownable{
 
     mapping (address => Position) positions;
 
-
-    error ContractPaused();
-    error InsufficientCollateral();
-    error InvalidLeverage();
-    error InsufficientFunds();
-    error PositionNotFound();
-    error NotPositionOwner();
-    error PositionNotLiquidatable();
-    error FundingTooEarly();
-
     modifier whenNotPaused() {
-        if (emergencyPause) revert ContractPaused();
+        require(!emergencyPause, "Contract paused");
         _;
     }
 
-    event FundingRateUpdated(int256 fundingRateBps, uint256 timestamp);
-    event PositionOpened(address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int256 entryFundingRate, bool isLong);
+    event FundingRateUpdated(int256 fundingRateBps, int256 accumulated);
+    event PositionOpened(uint256 indexed tokenId, address user, uint256 collateraal, uint256 entryPrice, uint8 leverage, int256 entryFundingRate, bool isLong);
     event PositionClosed(uint256 indexed tokenId, address indexed user, int256 pnl, int256 fundingPayment, uint256 fees);
     event PositionLiquidated(uint256 indexed tokenId, address indexed user);
-    event FundingRateUpdated(int256 newRate, int256 accumulated);
     event EmergencyPauseToggled(bool paused);
 
     constructor(address _positionNFT, address _virtualAMM, address _vault ) Ownable(msg.sender){
@@ -104,11 +93,11 @@ contract PositionManager is ReentrancyGuard, Ownable{
         }
 
          // record NFT for open position
-        positionNFT.mintPosition(msg.sender, _collateral, _leverage, entryPrice, fundingRateAccumulated, _isLong);
+        uint256 tokenId = positionNFT.mintPosition(msg.sender, _collateral, _leverage, entryPrice, fundingRateAccumulated, _isLong);
 
         virtualAMM.updateReserve(amount, _isLong);
 
-        emit PositionOpened(msg.sender, _collateral, entryPrice, _leverage, fundingRateAccumulated, _isLong);
+        emit PositionOpened(tokenId, msg.sender, _collateral, entryPrice, _leverage, fundingRateAccumulated, _isLong);
 
     }
 
@@ -141,6 +130,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         if (settlementAmount > 0) {
             vault.payOutProfit(msg.sender, uint256(settlementAmount));
         } else {
+            // settlementAmount <= 0 -> loss to be absorbed by vault
             vault.absorbLoss(msg.sender, uint256(-settlementAmount));
         }
         delete positions[msg.sender];
@@ -152,11 +142,9 @@ contract PositionManager is ReentrancyGuard, Ownable{
     function liquidatePosition(uint256 tokenId) external nonReentrant whenNotPaused {
         (uint256 collateral, uint8 leverage, uint256 entryPrice, int256 entryFundingRate, bool isLong) = _getPositionData(tokenId);        
         address owner = positionNFT.ownerOf(tokenId);
-        require(owner == msg.sender, "Not position owner");
-
-        if (!_isLiquidatable(collateral, leverage, entryPrice, entryFundingRate, isLong)) {
-            revert PositionNotLiquidatable();
-        }
+        
+        // use require instead of custom error
+        require(_isLiquidatable(collateral, leverage, entryPrice, entryFundingRate, isLong), "Position not liquidatable");
 
         (uint256 currentPrice, bool isValid) = virtualAMM.getCurrentPrice();
         require(isValid, "Invalid price");
@@ -164,6 +152,7 @@ contract PositionManager is ReentrancyGuard, Ownable{
         int256 pnl = _calculatePnl(isLong, leverage, collateral, entryPrice, currentPrice);
         int256 fundingPayment = _calculateFundingPayment(isLong, collateral, entryFundingRate);
 
+        // remaining value on the position (collateral + pnl + funding)
         int256 remainingValue = int256(collateral) + pnl + fundingPayment;
 
         uint256 amount = collateral * leverage;
@@ -176,23 +165,29 @@ contract PositionManager is ReentrancyGuard, Ownable{
         }
 
         positionNFT.burnPosition(tokenId);
+
+        // unlock collateral back to owner (vault handles transfer)
         vault.unlockCollateral(owner, collateral);
 
+        // pay out remaining or absorb loss
         if (remainingValue > 0) {
+            // remainingValue includes collateral + pnl + funding; pay what's left as profit
             vault.payOutProfit(owner, uint256(remainingValue));
-        }
-        else{
+        } else {
             vault.absorbLoss(owner, uint256(-remainingValue));
         }
 
-        delete positions[msg.sender];
-        virtualAMM.updateReserve(collateral, isLong);
+        // delete the position entry keyed by the owner (not msg.sender!)
+        delete positions[owner];
+
+        // update AMM reserve consistently using full position size
+        virtualAMM.updateReserve(amount, !isLong);
 
         emit PositionLiquidated(tokenId, owner);
     }
 
     function updateFundingRate() external onlyOwner {
-        if (block.timestamp < lastFundingTime + FUNDING_INTERVAL) revert FundingTooEarly();
+        require(block.timestamp >= lastFundingTime + FUNDING_INTERVAL, "Funding too early");
 
         int256 fundingRateBps = virtualAMM.calculateFundingRate();
         fundingRateAccumulated += fundingRateBps;
@@ -280,7 +275,13 @@ contract PositionManager is ReentrancyGuard, Ownable{
         return (totalLong, totalShort, totalLongCollateral, totalShortCollateral, fundingRateAccumulated);
     }
 
-    function getCurrentFundingRate() external view returns(int){
-        return fundingRateAccumulated;
+    function getCurrentFundingRate() external view returns(int256){
+        return virtualAMM.calculateFundingRate();
+    }
+
+    // convenience administrative function to toggle pause
+    function toggleEmergencyPause(bool _paused) external onlyOwner {
+        emergencyPause = _paused;
+        emit EmergencyPauseToggled(_paused);
     }
 }
